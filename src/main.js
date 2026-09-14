@@ -13,7 +13,7 @@ const writeLocal=(key,value)=>{try{localStorage.setItem(key,JSON.stringify(value
 const timeText=s=>Math.floor(s/60)+'분 '+Math.floor(s%60)+'초';
 const sound=new Sound();
 const modal=$('modal');
-let state=createState(),world=null,active=false,guest=false,userId='',device=readLocal('ant-rpg:device')||null;
+let state=createState(),world=null,active=false,userId='',device=readLocal('ant-rpg:device')||null;
 let work=null,currentEvent=null,eventWait=80,lastEvent='',autosaveElapsed=0,localElapsed=0,lastFrame=performance.now(),hudElapsed=0;
 let guideTarget=null,authMode='login',authPending=false,forcedLogin=false,stickId=null,stick={x:0,y:0},keys=new Set(),lastNearby=null,lastInteraction=0;
 const store=new RemoteStore({onStatus:showSaveStatus});
@@ -44,51 +44,55 @@ modal.addEventListener('cancel',e=>{if(forcedLogin||authPending)e.preventDefault
 modal.addEventListener('close',()=>{lastFrame=performance.now();});
 function stopMovement(){keys.clear();stick={x:0,y:0};stickId=null;$('stick-knob').style.transform='';world?.setInput(0,0);}
 function syncDevice(){
-  const mobile=device?.type==='mobile',ios=mobile&&device.os==='ios';
-  document.body.classList.toggle('mobile',mobile);document.body.classList.toggle('ios',ios);
-  const h=Math.floor(Math.min(window.innerHeight,window.visualViewport?.height||window.innerHeight));
-  document.documentElement.style.setProperty('--visible-height',h+'px');world?.resize();
-  if(mobile)$('quest-card').classList.add('collapsed');
+  const mobile=device?.type==='mobile';
+  document.body.classList.toggle('mobile',mobile);
+  const viewport=window.visualViewport;
+  const h=Math.floor(Math.min(window.innerHeight,viewport?.height||window.innerHeight));
+  document.documentElement.style.setProperty('--visible-height',h+'px');
+  document.documentElement.style.setProperty('--viewport-top',(viewport?.offsetTop||0)+'px');
+  world?.resize();
+}
+function collapseQuest(){
+  $('quest-card').classList.add('collapsed');
+  $('quest-toggle').setAttribute('aria-expanded','false');
 }
 window.addEventListener('resize',syncDevice);
 window.visualViewport?.addEventListener('resize',syncDevice);
+window.visualViewport?.addEventListener('scroll',syncDevice);
 function deviceDialog(returnToSettings=false){
   showModal('나에게 맞는 화면','<h2>어디에서 플레이할까요?</h2><p>기기에 맞춰 화면과 조작을 준비할게요.<br>설정에서 언제든 바꿀 수 있어요.</p><div class="device-options"><button id="choose-pc" class="device-option"><svg viewBox="0 0 40 40"><rect x="3" y="5" width="34" height="23" rx="3"/><path d="M20 28v7m-9 0h18"/></svg>PC로 플레이<small>마우스 · 키보드</small></button><button id="choose-mobile" class="device-option"><svg viewBox="0 0 40 40"><rect x="10" y="2" width="20" height="36" rx="4"/><path d="M17 6h6m-5 27h4"/></svg>모바일로 플레이<small>터치 · 조이스틱</small></button></div>');
-  const done=()=>{writeLocal('ant-rpg:device',device);syncDevice();returnToSettings?settingsDialog():authDialog();};
-  $('choose-pc').onclick=()=>{device={type:'pc',os:'pc',model:'컴퓨터'};if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});done();};
-  $('choose-mobile').onclick=()=>{
-    showModal('휴대폰에 맞게 준비하기','<h2>휴대폰을 골라 주세요</h2><p>기종과 화면 크기에 맞춰 조작 버튼을 배치해요.</p><div class="form-row"><label for="phone-os">휴대폰 종류</label><select id="phone-os"><option value="android">안드로이드</option><option value="ios">아이폰</option></select></div><div class="form-row"><label for="phone-model">사용하는 기종</label><select id="phone-model"></select></div><p id="phone-hint"></p><button id="device-done" class="primary full">이 화면으로 시작</button>');
-    const models={android:['갤럭시 S 시리즈','갤럭시 A 시리즈','갤럭시 Z 플립','갤럭시 Z 폴드','갤럭시 노트','구글 픽셀','기타 안드로이드'],ios:['아이폰 16 / 16 프로','아이폰 16 플러스 / 프로 맥스','아이폰 15 / 15 프로','아이폰 15 플러스 / 프로 맥스','아이폰 14 / 14 프로','아이폰 13 / 12','아이폰 미니 / SE','기타 아이폰']};
-    $('phone-os').value=/iPhone|iPad|iPod/.test(navigator.userAgent)?'ios':device?.os==='ios'?'ios':'android';
-    const choices=()=>{const os=$('phone-os').value;$('phone-model').innerHTML=models[os].map(x=>'<option>'+x+'</option>').join('');$('phone-hint').textContent=os==='ios'?'주소창 아래의 보이는 영역에 맞춰, 가로 폭은 그대로 사용해요.':'시작 버튼을 누르면 지원되는 브라우저에서 전체화면으로 전환해요.';};
-    $('phone-os').onchange=choices;choices();
-    $('device-done').onclick=()=>{device={type:'mobile',os:$('phone-os').value,model:$('phone-model').value};if(device.os==='android'&&document.documentElement.requestFullscreen){document.documentElement.requestFullscreen().catch(()=>{if(active)toast('전체화면이 제한된 브라우저예요. 현재 화면에 맞춰 플레이해요.');});}else if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});done();};
+  const choose=type=>{
+    device={type};writeLocal('ant-rpg:device',device);syncDevice();
+    if(type==='mobile')collapseQuest();
+    else{$('quest-card').classList.remove('collapsed');$('quest-toggle').setAttribute('aria-expanded','true');}
+    returnToSettings?settingsDialog():authDialog();
   };
+  $('choose-pc').onclick=()=>choose('pc');
+  $('choose-mobile').onclick=()=>choose('mobile');
 }
 function authDialog(message=''){
   const signup=authMode==='register';
-  showModal('작은 숲의 식구가 되어 주세요','<h2>'+(signup?'처음 만나는 우리 군락':'다시 만나서 반가워요')+'</h2><div class="auth-tabs"><button id="tab-login" class="'+(!signup?'active':'')+'">로그인</button><button id="tab-register" class="'+(signup?'active':'')+'">처음 왔어요</button></div><form id="auth-form"><div class="form-row"><label for="user-id">사용자 아이디</label><input id="user-id" name="username" autocomplete="username" maxlength="12" placeholder="한글 두 글자부터 열두 글자" value="'+escapeHTML(userId||'')+'" required><small>한글만 사용할 수 있어요. 예: 풀잎개미</small></div><div class="form-row"><label for="user-pin">네 자리 PIN</label><input id="user-pin" name="password" type="password" inputmode="numeric" autocomplete="'+(signup?'new-password':'current-password')+'" pattern="[0-9]{4}" minlength="4" maxlength="4" placeholder="숫자 네 자리" required></div><p id="auth-error" class="form-error" '+(!message?'hidden':'')+'>'+escapeHTML(message)+'</p><button id="auth-submit" class="primary full" type="submit">'+(signup?'새 식구로 시작하기':'이어서 플레이하기')+'</button></form><p class="form-note">진행 상황을 불러오기 위해 계정과 진행 데이터를 저장합니다</p>'+(!forcedLogin?'<div class="divider">기기에서 먼저 만나보기</div><button id="guest-start" class="text-button full">계정 없이 이 기기에서 플레이</button><p class="form-note">기기 체험은 이 브라우저에 저장돼요.<br>다른 기기와 이어 하려면 계정으로 시작해 주세요.</p>':'<button id="conflict-exit" class="text-button full">시작 화면으로 돌아가기</button>'),{locked:forcedLogin});
+  showModal('작은 숲의 식구가 되어 주세요','<h2>'+(signup?'처음 만나는 우리 군락':'다시 만나서 반가워요')+'</h2><div class="auth-tabs"><button id="tab-login" class="'+(!signup?'active':'')+'">로그인</button><button id="tab-register" class="'+(signup?'active':'')+'">처음 왔어요</button></div><form id="auth-form"><div class="form-row"><label for="user-id">사용자 아이디</label><input id="user-id" name="username" autocomplete="username" maxlength="12" placeholder="한글 두 글자부터 열두 글자" value="'+escapeHTML(userId||'')+'" required><small>한글만 사용할 수 있어요. 예: 풀잎개미</small></div><div class="form-row"><label for="user-pin">네 자리 PIN</label><input id="user-pin" name="password" type="password" inputmode="numeric" autocomplete="'+(signup?'new-password':'current-password')+'" pattern="[0-9]{4}" minlength="4" maxlength="4" placeholder="숫자 네 자리" required></div><p id="auth-error" class="form-error" '+(!message?'hidden':'')+'>'+escapeHTML(message)+'</p><button id="auth-submit" class="primary full" type="submit">'+(signup?'새 식구로 시작하기':'이어서 플레이하기')+'</button></form><p class="form-note">진행 상황을 불러오기 위해 계정과 진행 데이터를 저장합니다</p>'+(forcedLogin?'<button id="conflict-exit" class="text-button full">시작 화면으로 돌아가기</button>':''),{locked:forcedLogin});
   $('tab-login').onclick=()=>{authMode='login';authDialog();};$('tab-register').onclick=()=>{authMode='register';authDialog();};
   $('auth-form').onsubmit=async e=>{
     e.preventDefault();const id=$('user-id').value.trim(),pin=$('user-pin').value;
     if(!/^[가-힣]{2,12}$/.test(id)||!/^\d{4}$/.test(pin)){showAuthError('아이디는 한글 2~12자, PIN은 숫자 네 자리로 입력해 주세요.');return;}
-    authPending=true;for(const id of ['tab-login','tab-register','guest-start','conflict-exit'])if($(id))$(id).disabled=true;$('modal-close').hidden=true;const button=$('auth-submit');button.disabled=true;button.textContent='군락의 기록을 확인하고 있어요…';$('auth-error').hidden=true;
-    try{const result=await store[authMode](id,pin);forcedLogin=false;startGame(id,result.state,false);if(result.recoveredLocal)toast('기기에 남은 진행을 이어서 불러왔어요.');}
+    authPending=true;for(const id of ['tab-login','tab-register','conflict-exit'])if($(id))$(id).disabled=true;$('modal-close').hidden=true;const button=$('auth-submit');button.disabled=true;button.textContent='군락의 기록을 확인하고 있어요…';$('auth-error').hidden=true;
+    try{const result=await store[authMode](id,pin);forcedLogin=false;startGame(id,result.state);if(result.recoveredLocal)toast('기기에 남은 진행을 이어서 불러왔어요.');}
     catch(error){if(modal.open&&$('auth-error'))showAuthError(error.message);}
-    finally{authPending=false;for(const id of ['tab-login','tab-register','guest-start','conflict-exit'])if($(id))$(id).disabled=false;$('modal-close').hidden=forcedLogin;if($('auth-submit')){$('auth-submit').disabled=false;$('auth-submit').textContent=signup?'새 식구로 시작하기':'이어서 플레이하기';}}
+    finally{authPending=false;for(const id of ['tab-login','tab-register','conflict-exit'])if($(id))$(id).disabled=false;$('modal-close').hidden=forcedLogin;if($('auth-submit')){$('auth-submit').disabled=false;$('auth-submit').textContent=signup?'새 식구로 시작하기':'이어서 플레이하기';}}
   };
-  if($('guest-start'))$('guest-start').onclick=()=>{const backup=readLocal('ant-rpg:guest');const typed=$('user-id').value.trim();startGame(/^[가-힣]{2,12}$/.test(typed)?typed:backup?.id||'풀잎개미',backup?.state,true);};
   if($('conflict-exit'))$('conflict-exit').onclick=()=>{forcedLogin=false;endGame(false);};
 }
 function showAuthError(text){$('auth-error').textContent=text;$('auth-error').hidden=false;}
-function startGame(id,raw,isGuest){
-  active=false;state=raw?normalizeState(raw):createState();guest=isGuest;userId=id;
+function startGame(id,raw){
+  active=false;state=raw?normalizeState(raw):createState();userId=id;
   $('welcome').hidden=true;$('game').hidden=false;modal.close();
   world=new World($('world'),{npcs:NPCS,onNotice:message=>toast(message)});world.setState(state);world.applySnapshot(state.world);
   sound.unlock();sound.setVolumes(state.settings.bgm,state.settings.sfx);
   currentEvent=null;eventWait=75;lastEvent='';autosaveElapsed=0;localElapsed=0;guideTarget=null;work=null;
-  $('event-banner').hidden=true;syncDevice();active=true;lastFrame=performance.now();updateHUD();backupLocal();
-  showSaveStatus({kind:guest?'offline':'saved',message:guest?'기기 체험 · 이 브라우저에 저장':'진행 상황을 불러왔어요'});
+  $('event-banner').hidden=true;syncDevice();if(device?.type==='mobile')collapseQuest();active=true;lastFrame=performance.now();updateHUD();backupLocal();
+  showSaveStatus({kind:'saved',message:'진행 상황을 불러왔어요'});
   if(state.cleared){world.recruit(5);toast('여왕님, 오늘은 어떤 산책을 해 볼까요?');}
   else if(state.questIndex===0){toast('선배 봄이가 기다려요. 가까이 가서 인사해 보세요.');world.guideTo('봄이');}
   else toast('반가워요. 지난 발걸음에서 이어가요.');
@@ -96,15 +100,14 @@ function startGame(id,raw,isGuest){
 function snapshot(){if(world)state.world=world.getSnapshot();return state;}
 function backupLocal(){
   if(!active)return false;snapshot();
-  const ok=guest?writeLocal('ant-rpg:guest',{id:userId,state}):store.saveLocal(state);
+  const ok=store.saveLocal(state);
   if(!ok)showSaveStatus({kind:'error',message:'기기 저장 공간을 확인해 주세요'});
   return ok;
 }
 async function saveGame(manual=false){
-  if(!active)return {ok:false};snapshot();let result;
-  if(guest){result={ok:backupLocal()};showSaveStatus({kind:result.ok?'saved':'error',message:result.ok?'기기 체험 · 저장 완료':'기기 저장에 실패했어요'});}
-  else{result=await store.save(state);if(['SESSION_CONFLICT','REVISION_CONFLICT','INVALID_SESSION','SESSION_EXPIRED'].includes(result.code)){active=false;stopMovement();forcedLogin=true;authMode='login';authDialog(result.message||'다른 곳에서 계정이 사용됐어요. 다시 로그인해 주세요.');}}
-  if(manual&&active)toast(result.ok?(guest?'이 기기에 현재 진행을 저장했어요.':'군락의 기록을 안전하게 저장했어요.'):'연결을 확인해 주세요. 진행은 기기에 임시 보관했어요.',!result.ok);
+  if(!active)return {ok:false};snapshot();
+  const result=await store.save(state);if(['SESSION_CONFLICT','REVISION_CONFLICT','INVALID_SESSION','SESSION_EXPIRED'].includes(result.code)){active=false;stopMovement();forcedLogin=true;authMode='login';authDialog(result.message||'다른 곳에서 계정이 사용됐어요. 다시 로그인해 주세요.');}
+  if(manual&&active)toast(result.ok?'군락의 기록을 안전하게 저장했어요.':'연결을 확인해 주세요. 진행은 기기에 임시 보관했어요.',!result.ok);
   return result;
 }
 async function endGame(save=true){
@@ -116,6 +119,7 @@ function updateHUD(){
   $('place-name').textContent=world.scene==='nest'?'작은 숲 · 개미굴':'작은 숲 · 햇살 정원';
   $('day-label').textContent=['햇살이 머무는 아침','느긋한 숲의 오후','노을이 번지는 시간','별빛 아래의 군락'][Math.floor(state.stats.playSeconds/240)%4];
   $('quest-number').textContent=q?String(state.questIndex+1).padStart(2,'0')+' / '+QUESTS.length:'CLEAR';
+  $('quest-summary').textContent=q?q.title:'여왕의 일상';
   $('quest-title').textContent=q?q.title:'여왕의 평범하고 특별한 하루';
   $('quest-description').textContent=q?(ready?q.npc+'에게 돌아가 이야기를 마무리하세요.':q.description):'왕실에서 공물을 받고, 방을 꾸미고, 동료들과 산책하세요. 오늘은 쉬어도 좋아요.';
   $('quest-count').textContent=q?state.questProgress+' / '+q.count:'여유롭게';
@@ -147,7 +151,7 @@ function finishQuest(){
   closeModal();sound.play(result.rankUp?'rank':'reward');world.setState(state);backupLocal();updateHUD();
   if(result.cleared){world.recruit(5);showClear();saveGame(false);}
   else if(result.rankUp){const rank=getRank(state);showModal('또 한 걸음, 성장했어요','<svg class="clear-crown"><use href="#i-leaf"/></svg><div class="clear-title"><h2>'+rank.name+'</h2><p>'+escapeHTML(rank.perk)+'</p></div><div class="clear-detail">작은 일을 함께해 온 동료들이<br>당신의 새로운 시작을 응원해요.</div><button id="rank-continue" class="primary full">새로운 하루로</button>');$('rank-continue').onclick=()=>{closeModal();guideQuest();};}
-  else{toast('임무 완료 · 공헌도 +'+result.quest.xp);if(device?.type==='mobile')$('quest-card').classList.remove('collapsed');}
+  else{toast('임무 완료 · 공헌도 +'+result.quest.xp);if(device?.type==='mobile')collapseQuest();}
 }
 function npcDialog(entity){
   const npc=NPCS.find(n=>n.id===entity.id);if(!npc)return;
@@ -218,7 +222,7 @@ function tickEvents(dt){
   else{eventWait-=dt;if(eventWait<=0){const pool=EVENTS.filter(e=>(e.minRank||0)<=state.rank&&(!e.queenOnly||state.cleared)&&e.id!==lastEvent&&(!state.cleared||!['defend','repair'].includes(e.type)));beginEvent(pool[Math.floor(Math.random()*pool.length)]);}}
 }
 function settingsDialog(){
-  showModal('나의 작은 숲 설정','<h2>편안하게 머물러요</h2><div class="setting-row"><label for="bgm-volume">배경 음악 <span id="bgm-value">'+Math.round(state.settings.bgm*100)+'%</span></label><input id="bgm-volume" type="range" min="0" max="100" value="'+Math.round(state.settings.bgm*100)+'"></div><div class="setting-row"><label for="sfx-volume">효과음 <span id="sfx-value">'+Math.round(state.settings.sfx*100)+'%</span></label><input id="sfx-volume" type="range" min="0" max="100" value="'+Math.round(state.settings.sfx*100)+'"></div><div class="settings-buttons"><button id="save-now" class="primary">'+icon('save')+' 지금 저장</button><button id="change-device" class="secondary">기기 변경</button><button id="controls-help" class="secondary">조작 도움말</button><button id="logout" class="secondary">저장하고 로그아웃</button></div><p class="form-note">'+(guest?'기기 체험 중 · 이 브라우저에만 저장됩니다.':'계정으로 로그인 중 · 1분마다 자동 저장됩니다.')+'</p><div class="setting-meta"><span>'+escapeHTML(device?.model||'컴퓨터')+'</span><span>v'+VERSION+'</span></div>');
+  showModal('나의 작은 숲 설정','<h2>편안하게 머물러요</h2><div class="setting-row"><label for="bgm-volume">배경 음악 <span id="bgm-value">'+Math.round(state.settings.bgm*100)+'%</span></label><input id="bgm-volume" type="range" min="0" max="100" value="'+Math.round(state.settings.bgm*100)+'"></div><div class="setting-row"><label for="sfx-volume">효과음 <span id="sfx-value">'+Math.round(state.settings.sfx*100)+'%</span></label><input id="sfx-volume" type="range" min="0" max="100" value="'+Math.round(state.settings.sfx*100)+'"></div><div class="settings-buttons"><button id="save-now" class="primary">'+icon('save')+' 지금 저장</button><button id="change-device" class="secondary">기기 변경</button><button id="controls-help" class="secondary">조작 도움말</button><button id="logout" class="secondary">저장하고 로그아웃</button></div><p class="form-note">계정으로 로그인 중 · 1분마다 자동 저장됩니다.</p><div class="setting-meta"><span>'+(device?.type==='mobile'?'모바일':'PC')+'</span><span>v'+VERSION+'</span></div>');
   for(const key of ['bgm','sfx'])$(key+'-volume').oninput=()=>{state.settings[key]=Number($(key+'-volume').value)/100;$(key+'-value').textContent=Math.round(state.settings[key]*100)+'%';sound.setVolumes(state.settings.bgm,state.settings.sfx);if(key==='sfx')sound.play('click');backupLocal();};
   $('save-now').onclick=async()=>{const button=$('save-now');button.disabled=true;button.textContent='저장 중…';const result=await saveGame(true);if(button.isConnected){button.disabled=false;button.innerHTML=icon('save')+(result.ok?' 저장 완료':' 다시 저장');}};
   $('change-device').onclick=()=>deviceDialog(true);$('logout').onclick=()=>endGame(true);$('controls-help').onclick=helpDialog;
@@ -267,7 +271,8 @@ function frame(now){
 }
 $('start-button').onclick=()=>{sound.unlock();deviceDialog();};
 $('interact-button').onclick=interact;$('quest-guide').onclick=guideQuest;
-$('quest-toggle').onclick=()=>{$('quest-card').classList.toggle('collapsed');};
+$('quest-toggle').onclick=()=>{const collapsed=$('quest-card').classList.toggle('collapsed');$('quest-toggle').setAttribute('aria-expanded',String(!collapsed));};
+$('event-name').onclick=()=>{const expanded=$('event-banner').classList.toggle('expanded');$('event-name').setAttribute('aria-expanded',String(expanded));};
 $('map-button').onclick=mapDialog;$('journal-button').onclick=()=>journalDialog();$('settings-button').onclick=settingsDialog;
 $('home-button').onclick=()=>{guideTarget='entrance';world.guideTo('entrance');toast('집으로 이어지는 페로몬 길을 켰어요.');};
 $('event-guide').onclick=()=>{if(!currentEvent||work||modal.open)return;const near=world.nearest();if(near?.kind===currentEvent.target&&['station','dig'].includes(near.type)){stationAction(near,currentEvent.type);return;}guideTarget=currentEvent.type==='defend'?'predator':currentEvent.target;world.guideTo(guideTarget);toast('함께 일할 곳으로 길을 안내해요.');};
@@ -285,9 +290,9 @@ joystick.addEventListener('pointerdown',e=>{if(!active||modal.open||stickId!==nu
 joystick.addEventListener('pointermove',e=>{if(e.pointerId===stickId)moveStick(e);});
 function moveStick(e){const r=joystick.getBoundingClientRect(),radius=r.width*.32,dx=e.clientX-r.left-r.width/2,dy=e.clientY-r.top-r.height/2,length=Math.hypot(dx,dy),scale=length>radius?radius/length:1;stick={x:dx*scale/radius,y:dy*scale/radius};$('stick-knob').style.transform='translate('+dx*scale+'px,'+dy*scale+'px)';}
 for(const type of ['pointerup','pointercancel','lostpointercapture'])joystick.addEventListener(type,e=>{if(e.pointerId===stickId){stickId=null;stick={x:0,y:0};$('stick-knob').style.transform='';}});
-document.addEventListener('visibilitychange',()=>{stopMovement();lastFrame=performance.now();if(document.hidden){backupLocal();sound.suspend();}else{sound.resume();if(active&&!guest)saveGame(false);}});
+document.addEventListener('visibilitychange',()=>{stopMovement();lastFrame=performance.now();if(document.hidden){backupLocal();sound.suspend();}else{sound.resume();if(active)saveGame(false);}});
 window.addEventListener('pagehide',()=>backupLocal());
-window.addEventListener('online',()=>{if(active&&!guest)saveGame(false);});
+window.addEventListener('online',()=>{if(active)saveGame(false);});
 syncDevice();requestAnimationFrame(frame);
 // Local QA can inspect normal runtime state without enabling cheats on published pages.
 if(['127.0.0.1','localhost'].includes(location.hostname))window.__antGame={get state(){return state;},get world(){return world;},get active(){return active;},get event(){return currentEvent;},get store(){return store;},startGame,recordAction,interact,saveGame,beginEvent,getCurrentQuest:()=>getCurrentQuest(state),showClear};
