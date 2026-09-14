@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#344e37">
+<meta name="description" content="작은 일개미에서 여왕개미까지. 동료와 먹이를 나르고, 땅굴을 넓히며 살아가는 따뜻한 2D 생활 RPG.">
+<meta property="og:type" content="website"><meta property="og:locale" content="ko_KR"><meta property="og:title" content="개미 키우기 RPG"><meta property="og:description" content="작은 발걸음으로, 커다란 여왕의 꿈. 우리 군락에서 새로운 일상을 시작하세요."><meta property="og:image" content="./assets/kakao-preview.png"><meta property="og:image:width" content="800"><meta property="og:image:height" content="400"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="./assets/share-preview.png">
+<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml"><link rel="alternate icon" href="./assets/favicon.ico"><link rel="apple-touch-icon" href="./assets/apple-touch-icon.png"><link rel="manifest" href="./manifest.webmanifest"><link rel="stylesheet" href="./styles.css"><title>개미 키우기 RPG</title></head>
+<body>
+<svg class="icon-library" aria-hidden="true"><defs>
+<symbol id="i-leaf" viewBox="0 0 24 24"><path d="M20 3C9 2 3 6 4 13c1 7 12 9 16-10Z"/><path d="m3 22 12-14M8 16l-1-6m4 3 6 1"/></symbol>
+<symbol id="i-map" viewBox="0 0 24 24"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2ZM9 3v16M15 5v16"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5C9 2 4 3 2 4v16c4-2 7-1 10 1 3-2 6-3 10-1V4c-3-1-7-2-10 1Zm0 0v16M5 8h4M15 8h4M5 12h4M15 12h4"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><path d="m9 3 1-2h4l1 2 3 2 2 1 2 4-2 2v3l1 2-3 3-3-1-3 2-2-1-3 1-3-3 1-3-2-3 1-2 2-3 3-1Z"/><circle cx="12" cy="11" r="3"/></symbol>
+<symbol id="i-bag" viewBox="0 0 24 24"><path d="M8 6V4c0-3 8-3 8 0v2M5 6h14l2 15H3ZM9 11h6"/></symbol>
+<symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 7-2 7-7 3 3-8Z"/></symbol>
+<symbol id="i-hand" viewBox="0 0 24 24"><path d="M7 12V5a2 2 0 0 1 4 0v6-8a2 2 0 0 1 4 0v8-6a2 2 0 0 1 4 0v8-4a2 2 0 0 1 4 0v6c0 6-5 8-9 8-5 0-8-5-10-9-1-3 2-4 3-2Z" transform="translate(-2 -1) scale(.95)"/></symbol>
+<symbol id="i-crown" viewBox="0 0 24 24"><path d="m3 6 5 5 4-8 4 8 5-5-2 13H5ZM5 22h14"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="m2 11 10-9 10 9M5 9v12h14V9M10 21v-8h4v8"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m5 5 14 14M19 5 5 19"/></symbol>
+<symbol id="i-save" viewBox="0 0 24 24"><path d="M4 2h13l4 4v16H3V2ZM7 2v7h10V2M7 22v-9h10v9"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M3 12h17m-6-6 6 6-6 6"/></symbol>
+</defs></svg>
+<div id="app">
+<section id="welcome" class="welcome">
+<nav class="welcome-nav"><a class="brand" href="./"><img src="./assets/favicon.svg" alt="" width="34" height="34"><span>작은 숲의 이야기</span></a><span class="edition">A LITTLE LIFE, A BIG ADVENTURE</span></nav>
+<div class="welcome-layout">
+<div class="welcome-copy"><p class="eyebrow"><span></span> 숲 아래, 우리의 세상</p><h1>개미 키우기<br><span>RPG<span class="title-leaf">✦</span></span></h1><p class="intro">작은 발걸음으로,<br>커다란 여왕의 꿈.</p><p class="intro-detail">먹이를 나르고, 동료를 만나고, 함께 땅굴을 넓혀요.<br>오늘부터 이 작은 숲의 주인공은 당신이에요.</p><button id="start-button" class="primary big">군락에 들어가기 <svg><use href="#i-arrow"/></svg></button><div class="welcome-notes"><span>나만의 속도로 성장</span><i></i><span>클리어 뒤에도 계속되는 일상</span></div></div>
+<div class="welcome-art"><div class="art-caption"><span class="live-dot"></span> 작은 숲 군락 <span>오늘도 부지런히</span></div><img src="./assets/colony.svg" alt="잎사귀 아래에서 먹이를 나르고 여러 층의 땅굴에서 함께 생활하는 둥근 개미들" width="720" height="680"><div class="art-note"><svg><use href="#i-leaf"/></svg><span>혼자서는 작은 한 걸음.<br><b>함께라면, 새로운 길.</b></span></div></div>
+</div><footer class="welcome-footer"><span>채집 · 탐험 · 군락 생활</span><span>당신의 첫 번째 봄이 기다리고 있어요.</span></footer></section>
+<main id="game" hidden>
+<canvas id="world" aria-label="개미 군락 게임 화면"></canvas>
+<header class="hud-top"><div class="identity"><img src="./assets/favicon.svg" alt="" width="43" height="43"><div><span id="player-rank">갓 태어난 일개미</span><strong id="player-name">작은개미</strong></div></div><div class="world-time"><span class="live-dot"></span><span id="place-name">작은 숲 · 개미굴</span><small id="day-label">첫 번째 봄</small></div><div class="top-actions"><button id="map-button" class="icon-button" aria-label="지도 열기" title="지도 (M)"><svg><use href="#i-map"/></svg></button><button id="journal-button" class="icon-button" aria-label="기록장 열기" title="기록장 (J)"><svg><use href="#i-book"/></svg></button><button id="settings-button" class="icon-button" aria-label="설정 열기"><svg><use href="#i-gear"/></svg></button></div></header>
+<aside id="quest-card" class="quest-card"><button id="quest-toggle" class="quest-heading"><span><svg><use href="#i-leaf"/></svg> 오늘의 작은 발걸음</span><span id="quest-number">01 / 30</span></button><div class="quest-body"><h2 id="quest-title"></h2><p id="quest-description"></p><div class="quest-progress"><div><i id="quest-fill"></i></div><span id="quest-count"></span></div><div class="quest-bottom"><span id="quest-owner"></span><button id="quest-guide">길 안내 <span>↗</span></button></div></div></aside>
+<div id="event-banner" class="event-banner" hidden><span id="event-name"></span><p id="event-description"></p><div><span id="event-count"></span><button id="event-guide">현장으로 안내</button></div></div>
+<div id="toast-area" class="toast-area" aria-live="polite"></div><div id="work-progress" class="work-progress" hidden><span></span><div><i></i></div></div><div id="nearby-label" class="nearby-label" hidden></div>
+<footer class="hud-bottom"><div class="inventory-strip" id="inventory-strip"></div><div class="desktop-hint"><kbd>W A S D</kbd> 바깥 이동 <span>·</span> <kbd>E</kbd> 상호작용 <span>·</span> 굴 안은 클릭 이동</div><button id="interact-button" class="interact-button" disabled><svg><use href="#i-hand"/></svg><span>가까이 이동</span><kbd>E</kbd></button></footer>
+<div id="joystick" class="joystick" aria-label="이동 조이스틱"><span class="stick-ring"></span><span id="stick-knob"></span></div><button id="home-button" class="home-button" aria-label="집 방향 안내"><svg><use href="#i-home"/></svg></button><div class="save-indicator" id="save-indicator"><span></span><span id="save-label">기기에 저장됨</span></div>
+</main><span id="version" class="version">v1.0.1</span>
+<dialog id="modal"><div class="modal-top"><span id="modal-eyebrow"></span><button id="modal-close" class="icon-button" aria-label="닫기"><svg><use href="#i-close"/></svg></button></div><div id="modal-content"></div></dialog>
+</div><script type="module" src="./src/main.js"></script></body></html>
