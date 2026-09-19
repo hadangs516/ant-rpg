@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { QUESTS, RANKS } from '../src/content.js';
 import { RemoteStore } from '../src/storage.js';
+import { SCENES, STORY, normalizeCampaign } from '../src/campaign.js';
 
 const source = fs.readFileSync(new URL('../apps-script/Code.gs', import.meta.url), 'utf8');
 
@@ -52,15 +53,21 @@ function backend() {
   return { call, readRow, sheets, context, properties };
 }
 
+const campaign = () => ({
+  '단계': 0, '진행': 0, '동맹': [], '감옥': '없음', '형기': 0, '침입': 0,
+  '균열': 0, '암호순서': 0, '강화': { '이동': 0, '작업': 0, '운반': 0 },
+  '통행증': [], '개통': false, '수색': [], '왕실체력': 100, '원정': 0,
+  '모션': '없음', '집결': false, '긴급': null
+});
 const initial = (seconds = 0) => ({
   version: 1, rank: 1, xp: 140, questIndex: 2, questProgress: 1, completed: ['선배와 첫인사', '씨앗을 창고로'],
   inventory: { seed: 3, dew: 2, crumb: 1, leaf: 4, berry: 0 },
   stats: { playSeconds: seconds, gathered: 7, dug: 2, helped: 3, events: 1 },
   discoveries: ['반짝이는 이슬'], friendships: { 봄이: 2, 도담: 1 }, cleared: false, clearedAt: null,
-  queen: { decor: 0, tributes: 0 }, world: { scene: 'outside', x: 300, y: 240, dug: 2, followers: 3, ambientWork: 27.5 }, settings: { bgm: .35, sfx: .6 }
+  queen: { decor: 0, tributes: 0 }, world: { scene: 'outside', x: 300, y: 240, dug: 2, followers: 3, ambientWork: 27.5 }, settings: { bgm: .35, sfx: .6 }, campaign: campaign()
 });
 const register = (b, id = '작은개미') => b.call({ action: 'register', id, pin: '0516', requestId: 'register-0001' });
-const save = (b, auth, seconds = 60, extra = {}) => b.call({ action: 'save', id: '작은개미', token: auth.token, revision: auth.revision, requestId: 'save-000001', state: initial(seconds), version: '1.0.0', ...extra });
+const save = (b, auth, seconds = 60, extra = {}) => b.call({ action: 'save', id: '작은개미', token: auth.token, revision: auth.revision, requestId: 'save-000001', state: initial(seconds), version: '2.0.0', ...extra });
 
 test('구글 시트에 0516을 텍스트로 저장하고 한글 열과 복원 자료를 만든다', () => {
   const b = backend(), auth = register(b);
@@ -72,7 +79,7 @@ test('구글 시트에 0516을 텍스트로 저장하고 한글 열과 복원 �
   const row = b.readRow();
   assert.equal(row['누적 플레이 시간'], '0시간 01분 00초');
   assert.equal(row['현재 등급'], '견습 일개미');
-  assert.equal(row['현재 위치'], '개미굴 밖');
+  assert.equal(row['현재 위치'], SCENES.outside);
   assert.equal(row['친구 관계'], '봄이 2 · 도담 1');
   assert.ok(Object.keys(row).every(name => !/[A-Za-z]/.test(name)));
   assert.ok(!/[A-Za-z]/.test(row['진행 복원 자료']));
@@ -178,6 +185,8 @@ test('서버의 한국어 임무와 등급 표시는 실제 게임 콘텐츠와 
   const b = backend();
   assert.deepEqual(Array.from(b.context.QUEST_NAMES), QUESTS.map(quest => quest.title));
   assert.deepEqual(Array.from(b.context.RANK_NAMES), RANKS.map(rank => rank.name));
+  assert.deepEqual(JSON.parse(JSON.stringify(b.context.SCENE_NAMES)), SCENES);
+  assert.deepEqual(Array.from(b.context.STORY_NAMES), STORY.map(quest => quest?.title || ''));
 });
 
 test('0000 비밀번호와 이전 숫자 516으로 저장된 비밀번호도 일관되게 처리한다', () => {
@@ -258,4 +267,131 @@ test('다른 기기가 저장한 한 차수 앞의 진행은 잃은 응답으로
   assert.equal(login.recoveredLocal, false);
   assert.equal(login.state.questIndex, 6);
   assert.equal(login.state.stats.playSeconds, 90);
+});
+
+test('새 이야기와 모든 지역을 한글로 기록하고 재로그인 시 정확히 복원한다', () => {
+  const scenes = SCENES;
+  for (const [scene, name] of Object.entries(scenes)) {
+    const b = backend(), auth = register(b), state = initial(3456);
+    state.world.scene = scene;
+    Object.assign(state.campaign, {
+      '단계': 18, '진행': 3, '동맹': ['돌개', '초롱'], '감옥': '이야기', '형기': 20.5,
+      '침입': 2, '균열': 4, '암호순서': 3, '강화': { '이동': 3, '작업': 2, '운반': 1 },
+      '통행증': ['이끼', '갈대'], '개통': true, '수색': ['낡은기록', '빛버섯'],
+      '왕실체력': 46, '원정': 2, '모션': '격려', '집결': true,
+      '긴급': { '종류': '천적', '남은초': 117.5, '진척': 11.2, '지시': true, '실패': false }
+    });
+    assert.equal(save(b, auth, 3456, { state }).ok, true);
+    const row = b.readRow(), data = JSON.parse(row['진행 복원 자료']);
+    assert.equal(row['현재 위치'], name);
+    assert.equal(row['게임 버전'], '2.0.0');
+    assert.equal(Object.keys(row).length, 31);
+    assert.ok(!/[A-Za-z]/.test(row['진행 복원 자료']));
+    assert.equal(data['새 이야기']['개통'], '예');
+    assert.equal(data['새 이야기']['긴급']['실패'], '아니요');
+    const login = b.call({ action: 'login', id: '작은개미', pin: '0516', requestId: 'login-region' });
+    assert.equal(login.serverVersion, '2.0.0');
+    assert.deepEqual(login.state, state);
+  }
+});
+
+test('구버전 저장의 계정과 임무 진행은 보존하고 즉위와 개통 여부만 안전하게 이전한다', () => {
+  for (const cleared of [false, true]) {
+    const b = backend(), auth = register(b), state = initial(2000);
+    state.cleared = cleared; state.rank = cleared ? 5 : 1;
+    state.world.dug = 5;
+    delete state.campaign;
+    assert.equal(save(b, auth, 2000, { state }).ok, true);
+    // Simulate a row written by the prior deployment, not a v2 save request.
+    const sheet = b.sheets.get('플레이어'), data = JSON.parse(b.readRow()['진행 복원 자료']);
+    delete data['새 이야기'];
+    sheet.rows[1][30] = JSON.stringify(data);
+    const login = b.call({ action: 'login', id: '작은개미', pin: '0516', requestId: 'login-legacy' });
+    assert.equal(login.state.campaign['단계'], cleared ? 24 : 0);
+    assert.equal(login.state.campaign['개통'], true);
+    const { campaign: restoredCampaign, ...restored } = login.state;
+    assert.deepEqual(restored, state);
+    assert.equal(login.loginCount, 2);
+    assert.equal(login.revision, 1);
+    assert.equal(b.readRow()['네 자리 비밀번호'], '0516');
+  }
+});
+
+test('새 게임은 자동 굴착이 쌓여도 개통 완료를 임의로 만들지 않는다', () => {
+  const b = backend(), auth = register(b), state = initial(60);
+  state.world.dug = 999;
+  assert.equal(save(b, auth, 60, { state }).ok, true);
+  const login = b.call({ action: 'login', id: '작은개미', pin: '0516', requestId: 'login-closed' });
+  assert.equal(login.state.campaign['개통'], false);
+});
+
+test('새 이야기의 잘못된 수치와 알 수 없는 값을 제한하고 영문 항목은 시트로 내보내지 않는다', () => {
+  const b = backend(), auth = register(b), state = initial(60);
+  Object.assign(state.campaign, {
+    '단계': 999, '진행': -5, '동맹': ['돌개', '돌개', 'unknown'], '감옥': 'unknown',
+    '형기': -2, '침입': 200, '균열': 100, '암호순서': 20,
+    '강화': { '이동': -1, '작업': 100, '운반': 2.8, 'unknown': 90 },
+    '통행증': ['이끼', '이끼', 'unknown'], '수색': ['낡은기록', '영어english', 'unknown'],
+    '왕실체력': 123, '원정': -1, '모션': 'unknown', '집결': 'yes',
+    '긴급': { '종류': '비', '남은초': -1, '진척': 999, '지시': true, '실패': false, 'unknown': 'bad' },
+    'unknown': 'untrusted'
+  });
+  state.world.scene = 'unknown';
+  assert.equal(save(b, auth, 60, { state }).ok, true);
+  const login = b.call({ action: 'login', id: '작은개미', pin: '0516', requestId: 'login-bounds' });
+  const actual = login.state.campaign;
+  assert.deepEqual(Object.keys(actual).sort(), Object.keys(campaign()).sort());
+  assert.equal(actual['단계'], 24); assert.equal(actual['진행'], 0);
+  assert.deepEqual(actual['동맹'], ['돌개']); assert.equal(actual['감옥'], '없음');
+  assert.equal(actual['형기'], 0); assert.equal(actual['침입'], 3);
+  assert.equal(actual['균열'], 5); assert.equal(actual['암호순서'], 5);
+  assert.deepEqual(actual['강화'], { '이동': 0, '작업': 3, '운반': 2 });
+  assert.deepEqual(actual['통행증'], ['이끼']);
+  assert.deepEqual(actual['수색'], ['낡은기록', '영어']);
+  assert.equal(actual['왕실체력'], 100); assert.equal(actual['원정'], 0);
+  assert.equal(actual['모션'], '없음'); assert.equal(actual['집결'], false);
+  assert.deepEqual(actual['긴급'], { '종류': '비', '남은초': 0, '진척': 12, '지시': true, '실패': false });
+  assert.equal(login.state.world.scene, 'nest');
+  assert.ok(!/[A-Za-z]/.test(b.readRow()['진행 복원 자료']));
+});
+
+test('저장 서버 상태와 가입 응답에서 배포 버전을 확인할 수 있다', () => {
+  const b = backend(), auth = register(b);
+  assert.equal(JSON.parse(b.context.doGet().value).version, '2.0.0');
+  assert.equal(auth.serverVersion, '2.0.0');
+});
+
+test('구버전 장면 이름과 명시한 소리 설정을 유지하고 누락된 배경음만 새 기본값을 쓴다', () => {
+  const b = backend();
+  const aliases = { '개미굴 안': 'nest', '개미굴 밖': 'outside', '여왕의 방': 'throne', '변경 지대': 'frontier' };
+  for (const [label, scene] of Object.entries(aliases)) {
+    const encoded = b.context.encodeState_(b.context.normalize_(initial()));
+    encoded['위치']['장면'] = label;
+    assert.equal(b.context.decodeState_(JSON.stringify(encoded)).world.scene, scene);
+  }
+  const saved = initial();
+  assert.equal(b.context.normalize_(saved).settings.bgm, .35);
+  saved.settings.bgm = 0;
+  assert.equal(b.context.normalize_(saved).settings.bgm, 0);
+  delete saved.settings.bgm;
+  assert.equal(b.context.normalize_(saved).settings.bgm, .65);
+});
+
+test('추가 이야기의 현재 임무와 진행도 및 동맹을 읽기 쉬운 시트 열에 표시한다', () => {
+  for (let phase = 1; phase < STORY.length; phase++) {
+    const b = backend(), auth = register(b), state = initial();
+    Object.assign(state.campaign, { '단계': phase, '진행': 2, '동맹': ['돌개'], '수색': ['지워진 이름들'] });
+    assert.equal(save(b, auth, 0, { state }).ok, true);
+    const row = b.readRow();
+    assert.equal(row['진행 중인 임무'], STORY[phase].title);
+    assert.equal(row['임무 진행'], 2);
+    assert.ok(row['발견 기록'].includes('지워진 이름들'));
+    assert.ok(row['친구 관계'].includes('동맹 돌개'));
+  }
+});
+
+test('새 이야기의 경계값은 클라이언트와 서버에서 동일하게 정규화된다', () => {
+  const b = backend(), state = initial();
+  Object.assign(state.campaign, { '수색': Array.from({length: 40}, (_, i) => `기록 ${i}`), '긴급': { '종류': '천적', '남은초': 800, '진척': 50 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(b.context.normalize_(state).campaign)), normalizeCampaign(state.campaign));
 });

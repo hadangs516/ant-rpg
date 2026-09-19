@@ -17,13 +17,14 @@ function problem(message, code = 'NETWORK') {
 export class RemoteStore {
   constructor({ onStatus = () => {}, fetch = globalThis.fetch?.bind(globalThis),
     storage = storageOrNull('localStorage'), sessionStorage = storageOrNull('sessionStorage'),
-    url = API_URL, timeout = 18000 } = {}) {
+    url = API_URL, timeout = 18000, requiredServerMajor = 0 } = {}) {
     this.onStatus = onStatus;
     this.fetch = fetch;
     this.storage = storage;
     this.sessionStorage = sessionStorage;
     this.url = url;
     this.timeout = timeout;
+    this.requiredServerMajor = requiredServerMajor;
     this.id = null;
     this.token = null;
     this.revision = 0;
@@ -108,6 +109,9 @@ export class RemoteStore {
     }
     if (authGeneration !== this._authGeneration) throw problem('이미 취소된 로그인 요청입니다.', 'AUTH_CANCELLED');
     if (!data.token || !Number.isSafeInteger(data.revision)) throw problem('로그인 응답이 올바르지 않습니다.', 'SERVER_SETUP');
+    if (this.requiredServerMajor && !(Number(String(data.serverVersion||'0').split('.')[0]) >= this.requiredServerMajor)) {
+      throw problem('운영자가 새 Apps Script를 붙여 넣고 새 버전으로 배포해야 합니다. 아직 이전 저장 서버가 연결되어 있어요.', 'SERVER_SETUP');
+    }
     this._authAttempt = null;
     this._generation++;
     this.id = id;

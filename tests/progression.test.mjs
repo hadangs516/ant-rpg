@@ -36,7 +36,7 @@ test('missing or malformed save sections start safely with independent state obj
     assert.equal(state.inventory.seed, 0);
     assert.equal(state.stats.gathered, 0);
     assert.equal(state.rank, 0);
-    assert.equal(state.settings.bgm, 0.35);
+    assert.equal(state.settings.bgm, 0.65);
   }
 });
 
@@ -106,6 +106,7 @@ test('all quests remain reachable and queen life continues after one clear', () 
   const state = createState();
   const notices = [];
   for (let index = 0; index < 30; index++) {
+    if(index===29)state.campaign.단계=24;
     const quest = getCurrentQuest(state);
     assert.ok(quest, `missing quest ${index + 1}`);
     applyAction(state, quest.type, quest.target, quest.count);

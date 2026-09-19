@@ -7,10 +7,10 @@ function memory() {
   return { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, v), removeItem: k => values.delete(k) };
 }
 const state = seconds => ({ version: 1, rank: 0, stats: { playSeconds: seconds } });
-function harness(handler) {
+function harness(handler, options = {}) {
   const calls = [], statuses = [];
   const store = new RemoteStore({
-    storage: memory(), sessionStorage: memory(), onStatus: s => statuses.push(s),
+    storage: memory(), sessionStorage: memory(), onStatus: s => statuses.push(s), ...options,
     fetch: async (url, options) => {
       const body = JSON.parse(options.body); calls.push({ url, options, body });
       const result = await handler(body);
@@ -28,6 +28,26 @@ test('가입은 한글과 네 자리 문자열 PIN을 검증하고 0516을 보�
   assert.equal(calls[0].body.pin, '0516');
   assert.equal(calls[0].options.headers['Content-Type'], 'text/plain;charset=UTF-8');
   assert.notEqual(calls[0].options.mode, 'no-cors');
+});
+
+test('이전 저장 서버와 버전 없는 응답은 새 이야기 진행을 덮어쓰기 전에 차단한다', async () => {
+  for (const serverVersion of [undefined, '1.0.2', '잘못된버전']) {
+    const { store, calls } = harness(() => ({ ok: true, serverVersion, token: '세션', revision: 0, loginCount: 1, state: state(60) }), { requiredServerMajor: 2 });
+    await assert.rejects(store.login('개미', '0516'), error => error.code === 'SERVER_SETUP' && /새 버전으로 배포/.test(error.message));
+    assert.equal(store.id, null);
+    assert.equal(store.token, null);
+    assert.equal(store.loadLocal('개미'), null);
+    assert.equal((await store.save(state(90))).ok, false);
+    assert.equal(calls.length, 1);
+  }
+});
+
+test('새 버전 저장 서버의 계정과 진행은 정상적으로 불러온다', async () => {
+  const { store } = harness(() => ({ ok: true, serverVersion: '2.0.0', token: '세션', revision: 3, loginCount: 4, state: state(180) }), { requiredServerMajor: 2 });
+  const result = await store.login('개미', '0516');
+  assert.equal(result.state.stats.playSeconds, 180);
+  assert.equal(store.revision, 3);
+  assert.equal(store.id, '개미');
 });
 
 test('로그인 오류를 로컬 또는 체험 성공으로 바꾸지 않는다', async () => {

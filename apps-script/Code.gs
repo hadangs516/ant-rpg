@@ -1,9 +1,9 @@
-/* 개미 키우기 RPG · 구글 시트 저장 서버 · 1.0.0
+/* 개미 키우기 RPG · 구글 시트 저장 서버 · 2.0.0
  * 이 파일 전체를 게임 전용 시트의 확장 프로그램 → Apps Script에 붙여 넣으세요.
  * 처음 한 번 시트준비 함수를 실행한 후 웹 앱으로 배포합니다.
  */
 
-var GAME_VERSION = '1.0.0';
+var GAME_VERSION = '2.0.0';
 var SHEET_NAME = '플레이어';
 var HEADERS = [
   '사용자 아이디', '네 자리 비밀번호', '가입 시각', '최근 로그인 시각', '최근 저장 시각',
@@ -14,6 +14,19 @@ var HEADERS = [
   '게임 버전', '저장 차수', '진행 복원 자료'
 ];
 var RANK_NAMES = ['갓 태어난 일개미', '견습 일개미', '숙련 일개미', '작업대장', '여왕 후보', '여왕개미'];
+var SCENE_NAMES = {
+  nest: '작은 숲 개미굴', outside: '햇살 정원', prison: '경비 감옥', depths: '잊힌 지하',
+  moss: '이끼 군락', reed: '갈대 군락', throne: '닫힌 왕실', frontier: '바람의 변경'
+};
+var LEGACY_SCENES = { '개미굴 안': 'nest', '개미굴 밖': 'outside', '여왕의 방': 'throne', '변경 지대': 'frontier' };
+var STORY_NAMES = [
+  '', '바람이 새는 벽', '먼저 떠난 누군가', '아래로 향하는 첫걸음', '추방된 굴착가',
+  '지워진 이름들', '흐르는 물은 막을 수 없어', '어둠 속 여섯 불빛', '기억해야 할 다섯 약속',
+  '닫힌 문이 묻는 것', '첫 번째 동맹', '뿌리 너머의 바깥', '이끼 아래의 이웃',
+  '물 한 방울의 신뢰', '말보다 먼저 내미는 것', '함께 고치는 둑', '초록 깃발의 약속',
+  '바람을 버티는 군락', '경비대장의 시험', '같은 식탁', '서로의 등을 지키기',
+  '세 번째 깃발', '모두가 여는 문', '왕관보다 무거운 약속'
+];
 var QUEST_NAMES = [
   '처음 만난 선배', '작은 식구의 이불', '첫 번째 바깥나들이', '창고에 놓는 첫 선물', '벽 너머의 내일', '작은 일개미의 배지',
   '물방울 속의 하늘', '버섯 정원의 작은 찻잔', '길을 기억하는 방법', '바람에 날린 초록 조각', '비가 와도 보송하게', '돌아가지 않아도 되는 길',
@@ -87,6 +100,53 @@ function decimal_(value, fallback, min, max) { var number = Number(value); retur
 function korean_(value) { return text_(value, 100).replace(/[^가-힣ㄱ-ㅎㅏ-ㅣ0-9\s.,!?·()~+%★♥-]/g, '').trim(); }
 function list_(value) { return Array.isArray(value) ? value.slice(0, 300).map(korean_).filter(Boolean) : []; }
 
+function campaign_(raw, cleared, dug) {
+  var legacy = !raw || typeof raw !== 'object' || Array.isArray(raw);
+  var value = legacy ? {} : raw;
+  var upgrades = value['강화'] || {}, emergency = value['긴급'];
+  var choose = function (item, options) { return options.indexOf(item) >= 0 ? item : options[0]; };
+  var unique = function (items) { return items.filter(function (item, index) { return items.indexOf(item) === index; }); };
+  var subset = function (items, options) { return unique(list_(items).filter(function (item) { return options.indexOf(item) >= 0; })); };
+  return {
+    '단계': cleared ? 24 : integer_(value['단계'], 24), '진행': integer_(value['진행'], 99),
+    '동맹': subset(value['동맹'], ['돌개', '초롱', '모래']),
+    '감옥': choose(value['감옥'], ['없음', '일반', '이야기']),
+    '형기': decimal_(value['형기'], 0, 0, 3600), '침입': integer_(value['침입'], 3),
+    '균열': integer_(value['균열'], 5), '암호순서': integer_(value['암호순서'], 5),
+    '강화': { '이동': integer_(upgrades['이동'], 3), '작업': integer_(upgrades['작업'], 3), '운반': integer_(upgrades['운반'], 3) },
+    '통행증': subset(value['통행증'], ['이끼', '갈대']),
+    '개통': value['개통'] === true || (legacy && integer_(dug) >= 5),
+    '수색': unique(list_(value['수색']).map(function (item) { return item.slice(0, 60); })).slice(0, 40),
+    '왕실체력': decimal_(value['왕실체력'], 100, 0, 100), '원정': integer_(value['원정'], 99999),
+    '모션': choose(value['모션'], ['없음', '인사', '위엄', '기쁨', '격려']), '집결': value['집결'] === true,
+    '긴급': emergency && typeof emergency === 'object' && ['천적', '비'].indexOf(emergency['종류']) >= 0 ? {
+      '종류': emergency['종류'], '남은초': decimal_(emergency['남은초'], 0, 0, 300),
+      '진척': decimal_(emergency['진척'], 0, 0, 12), '지시': emergency['지시'] === true, '실패': emergency['실패'] === true
+    } : null
+  };
+}
+
+function encodeCampaign_(campaign) {
+  var data = Object.assign({}, campaign);
+  data['개통'] = campaign['개통'] ? '예' : '아니요';
+  data['집결'] = campaign['집결'] ? '예' : '아니요';
+  data['긴급'] = campaign['긴급'] ? Object.assign({}, campaign['긴급'], {
+    '지시': campaign['긴급']['지시'] ? '예' : '아니요', '실패': campaign['긴급']['실패'] ? '예' : '아니요'
+  }) : '없음';
+  return data;
+}
+
+function decodeCampaign_(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  var campaign = Object.assign({}, data);
+  campaign['개통'] = data['개통'] === '예';
+  campaign['집결'] = data['집결'] === '예';
+  campaign['긴급'] = data['긴급'] && typeof data['긴급'] === 'object' ? Object.assign({}, data['긴급'], {
+    '지시': data['긴급']['지시'] === '예', '실패': data['긴급']['실패'] === '예'
+  }) : null;
+  return campaign;
+}
+
 function normalize_(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.version !== 1) fail_('INVALID_STATE', '진행 자료의 형식이 올바르지 않습니다.');
   var inventory = raw.inventory || {}, stats = raw.stats || {}, world = raw.world || {}, settings = raw.settings || {}, queen = raw.queen || {};
@@ -102,8 +162,9 @@ function normalize_(raw) {
     discoveries: list_(raw.discoveries), friendships: friendships, cleared: raw.cleared === true,
     clearedAt: typeof raw.clearedAt === 'number' ? integer_(raw.clearedAt, 10000000000000) : raw.clearedAt ? text_(raw.clearedAt, 40) : null,
     queen: { decor: integer_(queen.decor), tributes: integer_(queen.tributes) },
-    world: { scene: world.scene === 'outside' ? 'outside' : 'nest', x: decimal_(world.x, 0, -100000, 100000), y: decimal_(world.y, 0, -100000, 100000), dug: integer_(world.dug), followers: integer_(world.followers, 5), ambientWork: decimal_(world.ambientWork, 0, 0, 159.999) },
-    settings: { bgm: decimal_(settings.bgm, .35, 0, 1), sfx: decimal_(settings.sfx, .6, 0, 1) }
+    world: { scene: Object.prototype.hasOwnProperty.call(SCENE_NAMES, world.scene) ? world.scene : 'nest', x: decimal_(world.x, 0, -100000, 100000), y: decimal_(world.y, 0, -100000, 100000), dug: integer_(world.dug), followers: integer_(world.followers, 5), ambientWork: decimal_(world.ambientWork, 0, 0, 159.999) },
+    settings: { bgm: decimal_(settings.bgm, .65, 0, 1), sfx: decimal_(settings.sfx, .6, 0, 1) },
+    campaign: campaign_(raw.campaign, raw.cleared === true, world.dug)
   };
 }
 
@@ -115,8 +176,9 @@ function encodeState_(state) {
     '활동 기록': { '플레이 초': state.stats.playSeconds, '채집': state.stats.gathered, '굴착': state.stats.dug, '도움': state.stats.helped, '사건 해결': state.stats.events },
     '발견 기록': state.discoveries, '친구 관계': state.friendships, '클리어': state.cleared ? '예' : '아니요',
     '즉위 시각': state.clearedAt ? new Date(state.clearedAt).getTime() || '' : '', '여왕 생활': { '장식': state.queen.decor, '진상품': state.queen.tributes },
-    '위치': { '장면': state.world.scene === 'nest' ? '개미굴 안' : '개미굴 밖', '가로': state.world.x, '세로': state.world.y, '굴착': state.world.dug, '동료 수': state.world.followers, '굴착조 작업 초': state.world.ambientWork },
-    '소리 설정': { '배경 음악': state.settings.bgm, '효과음': state.settings.sfx }
+    '위치': { '장면': SCENE_NAMES[state.world.scene], '가로': state.world.x, '세로': state.world.y, '굴착': state.world.dug, '동료 수': state.world.followers, '굴착조 작업 초': state.world.ambientWork },
+    '소리 설정': { '배경 음악': state.settings.bgm, '효과음': state.settings.sfx },
+    '새 이야기': encodeCampaign_(state.campaign)
   };
 }
 
@@ -132,8 +194,9 @@ function decodeState_(json) {
     discoveries: data['발견 기록'], friendships: data['친구 관계'], cleared: data['클리어'] === '예',
     clearedAt: typeof data['즉위 시각'] === 'number' ? new Date(data['즉위 시각']).toISOString() : data['즉위 시각'] || null,
     queen: { decor: queen['장식'], tributes: queen['진상품'] },
-    world: { scene: world['장면'] === '개미굴 밖' ? 'outside' : 'nest', x: world['가로'], y: world['세로'], dug: world['굴착'], followers: world['동료 수'], ambientWork: world['굴착조 작업 초'] },
-    settings: { bgm: settings['배경 음악'], sfx: settings['효과음'] }
+    world: { scene: Object.keys(SCENE_NAMES).filter(function (key) { return SCENE_NAMES[key] === world['장면']; })[0] || LEGACY_SCENES[world['장면']] || 'nest', x: world['가로'], y: world['세로'], dug: world['굴착'], followers: world['동료 수'], ambientWork: world['굴착조 작업 초'] },
+    settings: { bgm: settings['배경 음악'], sfx: settings['효과음'] },
+    campaign: decodeCampaign_(data['새 이야기'])
   });
 }
 
@@ -147,17 +210,20 @@ function writeProgress_(row, state, version) {
   state.stats.playSeconds = seconds;
   set('최근 저장 시각', stamp_()); set('누적 플레이 시간', duration_(seconds)); set('누적 플레이 초', seconds);
   set('현재 등급', RANK_NAMES[state.rank]); set('공헌도', state.xp);
-  set('진행 중인 임무', state.cleared ? '여왕의 평온한 일상' : QUEST_NAMES[state.questIndex] || '주요 임무 ' + (state.questIndex + 1) + '번째');
-  set('임무 진행', state.questProgress); set('완료한 임무 수', state.completed.length);
+  var storyName = STORY_NAMES[state.campaign['단계']];
+  set('진행 중인 임무', state.cleared ? '여왕의 평온한 일상' : storyName || QUEST_NAMES[state.questIndex] || '주요 임무 ' + (state.questIndex + 1) + '번째');
+  set('임무 진행', storyName ? state.campaign['진행'] : state.questProgress); set('완료한 임무 수', state.completed.length + state.campaign['수색'].length);
   set('클리어 여부', state.cleared ? '클리어' : '성장 중');
   var date = state.clearedAt ? new Date(state.clearedAt) : null;
   set('즉위 시각', date && !isNaN(date.getTime()) ? Utilities.formatDate(date, 'Asia/Seoul', 'yyyy년 MM월 dd일 HH시 mm분 ss초') : '아직 즉위하지 않음');
-  set('현재 위치', state.world.scene === 'nest' ? '개미굴 안' : '개미굴 밖');
+  set('현재 위치', SCENE_NAMES[state.world.scene]);
   ['seed', 'dew', 'crumb', 'leaf', 'berry'].forEach(function (key, index) { row[16 + index] = state.inventory[key]; });
   set('채집 횟수', state.stats.gathered); set('굴착 횟수', state.stats.dug); set('도움 횟수', state.stats.helped); set('사건 해결 횟수', state.stats.events);
-  set('발견 기록', state.discoveries.join(' · ') || '아직 없음');
-  set('친구 관계', Object.keys(state.friendships).map(function (name) { return name + ' ' + state.friendships[name]; }).join(' · ') || '첫 만남을 기다리는 중');
-  set('여왕 생활', '장식 ' + state.queen.decor + '개 · 진상품 ' + state.queen.tributes + '개');
+  set('발견 기록', state.discoveries.concat(state.campaign['수색']).join(' · ') || '아직 없음');
+  var friends = Object.keys(state.friendships).map(function (name) { return name + ' ' + state.friendships[name]; });
+  if (state.campaign['동맹'].length) friends.push('동맹 ' + state.campaign['동맹'].join(' · '));
+  set('친구 관계', friends.join(' · ') || '첫 만남을 기다리는 중');
+  set('여왕 생활', '장식 ' + state.queen.decor + '개 · 진상품 ' + state.queen.tributes + '개 · 원정 ' + state.campaign['원정'] + '회');
   set('게임 버전', /^\d+\.\d+\.\d+$/.test(version || '') ? version : GAME_VERSION);
   var json = JSON.stringify(encodeState_(state));
   if (json.length > 45000) fail_('SAVE_TOO_LARGE', '진행 자료가 저장 가능한 크기를 초과했습니다.');
@@ -186,7 +252,7 @@ function session_(id) {
 }
 function putSession_(id, session) { PropertiesService.getScriptProperties().setProperty('접속_' + id, JSON.stringify(session)); }
 function authResult_(row, session) {
-  return { ok: true, token: session.token, revision: integer_(row[COL['저장 차수']]), loginCount: integer_(row[COL['로그인 횟수']]),
+  return { ok: true, serverVersion: GAME_VERSION, token: session.token, revision: integer_(row[COL['저장 차수']]), loginCount: integer_(row[COL['로그인 횟수']]),
     lastSavedRequestId: session.lastRequest || null, lastSavedRevision: integer_(session.lastRevision),
     state: decodeState_(row[COL['진행 복원 자료']]) };
 }

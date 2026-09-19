@@ -1,4 +1,5 @@
 import { RANKS, NPCS, QUESTS, DISCOVERY_LABELS } from './content.js';
+import { normalizeCampaign, SCENES } from './campaign.js';
 
 const RESOURCE_KEYS = ['seed', 'dew', 'crumb', 'leaf', 'berry'];
 const STAT_KEYS = ['playSeconds', 'gathered', 'dug', 'helped', 'events'];
@@ -20,7 +21,7 @@ export function createState() {
     stats: { playSeconds: 0, gathered: 0, dug: 0, helped: 0, events: 0 },
     discoveries: [], friendships: {}, cleared: false, clearedAt: null,
     queen: { decor: 0, tributes: 0 }, world: { scene: 'nest', x: 0, y: 0, dug: 0, followers: 0, ambientWork: 0 },
-    settings: { bgm: 0.35, sfx: 0.6 },
+    settings: { bgm: 0.65, sfx: 0.6 }, campaign: normalizeCampaign(),
   };
 }
 
@@ -46,9 +47,9 @@ export function normalizeState(raw) {
   state.questProgress = integer(source.questProgress, 0, 0, getCurrentQuest(state)?.count ?? 0);
   for (const key of RESOURCE_KEYS) state.inventory[key] = integer(inventory[key], 0, 0, 99999);
   for (const key of STAT_KEYS) state.stats[key] = bounded(stats[key]);
-  state.settings.bgm = bounded(settings.bgm, 0.35, 0, 1);
+  state.settings.bgm = bounded(settings.bgm, 0.65, 0, 1);
   state.settings.sfx = bounded(settings.sfx, 0.6, 0, 1);
-  state.world.scene = world.scene === 'outside' ? 'outside' : 'nest';
+  state.world.scene = Object.hasOwn(SCENES,world.scene) ? world.scene : 'nest';
   state.world.x = bounded(world.x, 0, -10000, 10000);
   state.world.y = bounded(world.y, 0, -10000, 10000);
   state.world.dug = integer(world.dug, 0, 0, 99999);
@@ -56,6 +57,7 @@ export function normalizeState(raw) {
   state.world.ambientWork = bounded(world.ambientWork, 0, 0, 159);
   state.queen.decor = integer(queen.decor, 0, 0, 99999);
   state.queen.tributes = integer(queen.tributes, 0, 0, 99999);
+  state.campaign = normalizeCampaign(source.campaign,{cleared:state.cleared,dug:state.world.dug});
   if (Array.isArray(source.discoveries)) {
     state.discoveries = [...new Set(source.discoveries.filter(value => typeof value === 'string' && value.trim()).map(value => value.slice(0, 80)))].slice(0, 200);
   }
@@ -100,6 +102,7 @@ export function canCompleteQuest(state) {
 export function completeQuest(state) {
   const quest = getCurrentQuest(state);
   if (!canCompleteQuest(state)) return { ok: false, quest, rankUp: false, cleared: false };
+  if (quest.type === 'royal' && state.campaign.단계 < 24) return {ok:false,quest,rankUp:false,cleared:false};
   const previousRank = rankAt(state.questIndex);
   state.completed.push(quest.id);
   state.xp += quest.xp;

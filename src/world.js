@@ -1,12 +1,17 @@
 /* A connected, living ant colony. Distances and speeds use world pixels. */
+import { REGIONS, ROOM_RANKS, RANK_LABELS, GARDEN_TRAILS, GARDEN_OBSTACLES } from './regions.js';
+export { REGIONS } from './regions.js';
 const TAU = Math.PI * 2;
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const lerp = (a, b, t) => a + (b - a) * t;
 const COLORS = ['#b87945', '#9d603c', '#825039', '#ae6640', '#c89048', '#dfa955'];
 const SIZES = [1, 1.12, 1.24, 1.35, 1.5, 1.8];
-const GARDEN = { width: 2500, height: 1900 };
-const NEST = { width: 2500, height: 1720 };
+const GARDEN = REGIONS.outside;
+const NEST = REGIONS.nest;
+const DIG_LIMIT = 8;
+const DIG_PATH = [{ x: 2210, y: 1140 }, { x: 2300, y: 1250 }, { x: 2210, y: 1400 }, { x: 2030, y: 1540 }, { x: 2175, y: 1740 }];
+const NEW_ROOM = { id: 'new-room', name: '새싹의 방', x: 2175, y: 1740, rx: 195, ry: 125, decor: 'garden' };
 
 export const NEST_ROOMS = [
   { id: 'entrance', name: '햇살 입구', x: 1220, y: 240, rx: 170, ry: 96, decor: 'entrance' },
@@ -64,12 +69,13 @@ function projectSegment(p, a, b) {
   return { x: a.x + dx * t, y: a.y + dy * t };
 }
 
-/** The same graph drives player movement, workers, navigation and the map. */
+/** Workers use routes; player movement only uses the walkable geometry. */
 export class ColonyGraph {
-  constructor() {
-    this.nodes = NEST_ROOMS.map(room => ({ ...room }));
+  constructor(rooms = NEST_ROOMS, corridors = CORRIDORS) {
+    this.rooms = rooms;
+    this.nodes = rooms.map(room => ({ ...room }));
     this.edges = [];
-    for (const [from, to, bends, locked] of CORRIDORS) {
+    for (const [from, to, bends, locked] of corridors) {
       let previous = this.nodes.findIndex(node => node.id === from);
       for (const [x, y] of bends) {
         const index = this.nodes.push({ x, y }) - 1;
@@ -82,7 +88,7 @@ export class ColonyGraph {
   }
 
   snap(point) {
-    const room = NEST_ROOMS.find(r => ((point.x - r.x) / (r.rx - 25)) ** 2 + ((point.y - r.y) / (r.ry - 24)) ** 2 <= 1);
+    const room = this.rooms.find(r => ((point.x - r.x) / (r.rx - 16)) ** 2 + ((point.y - r.y) / (r.ry - 16)) ** 2 <= 1);
     if (room) return { point: { x: point.x, y: point.y }, projection: { x: room.x, y: room.y }, room: room.id };
     let best = null;
     for (const edge of this.edges) {
@@ -90,6 +96,10 @@ export class ColonyGraph {
       const projection = projectSegment(point, this.nodes[edge.a], this.nodes[edge.b]);
       const d = distance(point, projection);
       if (!best || d < best.distance) best = { point: projection, projection, edge, distance: d };
+    }
+    if (!best) {
+      const room = this.rooms.slice().sort((a, b) => distance(a, point) - distance(b, point))[0];
+      if (room) return { point: { x: room.x, y: room.y }, projection: { x: room.x, y: room.y }, room: room.id };
     }
     return best;
   }
@@ -162,7 +172,11 @@ function drawAnt(ctx, ant, time, top = false, selected = false) {
   const size = ant.size || 1;
   const moving = ant.moving;
   const stride = moving ? Math.sin(time * 15 + (ant.phase || 0)) * 5 : Math.sin(time * 2 + (ant.phase || 0)) * .8;
-  ctx.save(); ctx.translate(ant.x, ant.y);
+  const gesture = ant.emote;
+  const hop = gesture === '기쁨' ? Math.abs(Math.sin(time * 8)) * 12 : gesture === '격려' ? Math.abs(Math.sin(time * 5)) * 4 : 0;
+  ctx.save(); ctx.translate(ant.x, ant.y - hop);
+  if (gesture === '인사') ctx.rotate(Math.sin(time * 5) * .14);
+  if (gesture === '위엄') ctx.scale(1.04, 1.06);
   ellipse(ctx, 0, 13 * size, 23 * size, 5 * size, '#00000025');
   if (selected) {
     ctx.save(); ctx.scale(1, top ? 1 : .55);
@@ -225,9 +239,13 @@ function drawAnt(ctx, ant, time, top = false, selected = false) {
 }
 
 export class World {
-  constructor(canvas, { npcs = [], onNotice = () => {} } = {}) {
-    this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.onNotice = onNotice;
+  constructor(canvas, { npcs = [], onNotice = () => {}, onTrespass = () => {} } = {}) {
+    this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.onNotice = onNotice; this.onTrespass = onTrespass;
     this.graph = new ColonyGraph(); this.scene = 'nest'; this.time = 0; this.dug = 0; this.state = null;
+    this.regionGraphs = Object.fromEntries(Object.entries(REGIONS).filter(([, region]) => region.rooms).map(([id, region]) => [id, new ColonyGraph(region.rooms, region.corridors)]));
+    this.regionEntities = Object.fromEntries(Object.entries(REGIONS).map(([id, region]) => [id, region.entities.map(entity => ({ ...entity }))]));
+    this.regionCaches = new Map(); this.trespassLatch = new Set(); this.releasedInput = 0; this.homeTrail = false; this.homePath = [];
+    this.activity = null; this.queenCommand = false; this.guardAnts = []; this.emoteUntil = 0;
     this.player = { x: 1235, y: 265, facing: 1, angle: 0, size: 1, rank: 0, color: COLORS[0], moving: false };
     this.camera = { x: this.player.x, y: this.player.y + 30 }; this.input = { x: 0, y: 0 };
     this.path = []; this.guide = null; this.event = null; this.followers = []; this.particles = [];
@@ -271,7 +289,20 @@ export class World {
       { id: 'entrance', type: 'exit', name: '우리 개미굴로', x: 1210, y: 1390, scene: 'outside' },
       { id: 'scout', type: 'station', kind: 'scout', name: '정원 관측대', x: 1330, y: 690, scene: 'outside' },
       ...this.resources,
+      ...this.regionEntities.outside,
     ];
+    this.nestEntities.push({ id: '상점', type: 'story', appearance: 'shop', name: '씨앗 교환소', x: 1770, y: 1200, scene: 'nest' });
+    const trailNodes = [], trailLinks = [], trailIndexes = new Map();
+    for (const trail of GARDEN_TRAILS) {
+      let previous;
+      for (const [x, y] of trail) {
+        const key = `${x},${y}`;
+        if (!trailIndexes.has(key)) { trailIndexes.set(key, key); trailNodes.push({ id: key, x, y, rx: 18, ry: 18 }); }
+        if (previous) trailLinks.push([previous, key, []]);
+        previous = key;
+      }
+    }
+    this.trailGraph = new ColonyGraph(trailNodes, trailLinks);
     const shifts = [
       ['nursery', 'pantry', 'nursery', 'rest'], ['entrance', 'pantry', 'market', 'entrance'],
       ['workshop', 'dig', 'dig', 'fungus'], ['guard', 'entrance', 'meeting', 'guard'],
@@ -293,7 +324,11 @@ export class World {
       phase: i, angle: 0, path: [], speed: 52 + this.random() * 16, pause: i * .7, moving: false,
       carry: i % 2 ? 'seed' : null,
     }));
-    this.resize();
+    this.regionWorkers = Object.fromEntries(['depths','moss','reed','frontier'].map(scene => [scene, Array.from({length:8},(_,i)=>{
+      const rooms=REGIONS[scene].rooms,room=rooms[i%rooms.length];
+      return {x:room.x+i*3,y:room.y+15,size:.6+(i%3)*.07,color:'#916b46',phase:i,shiftIndex:i%rooms.length,path:[],pause:i*.7,speed:45+i*3,facing:1,carry:i%3===0?'leaf':null,hat:i%4===0?'helmet':null};
+    })]));
+    this.setDug(0); this.resize();
   }
 
   resize() {
@@ -307,18 +342,23 @@ export class World {
 
   setState(state) {
     this.state = state;
+    const passageOpen = (state?.campaign?.단계 || 0) >= 3 || state?.cleared;
+    if (this.passageOpen !== passageOpen) { this.passageOpen = passageOpen; this.regionCaches.delete('prison'); }
     const rank = clamp(Number(state?.rank) || 0, 0, 5);
     this.player.rank = rank; this.player.size = SIZES[rank]; this.player.color = COLORS[rank];
     if (this.dug < (Number(state?.world?.dug) || 0)) this.setDug(state.world.dug);
   }
 
   setMode(scene) {
-    if (scene !== 'nest' && scene !== 'outside' || scene === this.scene) return;
+    if (!REGIONS[scene] || scene === this.scene) return;
+    const previous = this.scene;
     this.scene = scene; this.path = []; this.input = { x: 0, y: 0 }; this.guide = null;
-    Object.assign(this.player, scene === 'nest' ? { x: 1260, y: 250 } : { x: 1210, y: 1450 });
+    this.activity = null; this.homeTrail = false; this.homePath = []; this.trespassLatch.clear();
+    const returnDoor = this.regionEntities[scene]?.find(entity => entity.destination === previous);
+    Object.assign(this.player, returnDoor ? { x: returnDoor.x + 24, y: returnDoor.y + 20 } : REGIONS[scene].entry);
     this.camera.x = this.player.x; this.camera.y = this.player.y + 30;
-    this.followers.forEach((follower, i) => { follower.x = this.player.x - 45 * (i + 1); follower.y = this.player.y + 10; follower.path = []; });
-    this.onNotice(scene === 'outside' ? '바람 냄새가 나요. 지도에서 집과 먹이를 찾아보세요.' : '우리 굴에 돌아왔어요. 가고 싶은 곳을 눌러 이동하세요.');
+    this.followers.forEach((follower, i) => { follower.x = this.player.x - 6 * (i + 1); follower.y = this.player.y + 10; follower.path = []; });
+    this.onNotice(`${REGIONS[scene].name} · 조이스틱 또는 방향키로 이동하세요.`);
   }
 
   setInput(x, y) {
@@ -331,13 +371,7 @@ export class World {
     return { x: (x - this.width / 2) / this.zoom + this.camera.x, y: (y - this.height * .52) / this.zoom + this.camera.y };
   }
 
-  moveToScreen(x, y) {
-    const point = this.screenToWorld(x, y);
-    this.guide = null;
-    if (this.scene === 'nest') this.path = this.graph.route(this.player, point);
-    else this.path = [{ x: clamp(point.x, 65, GARDEN.width - 65), y: clamp(point.y, 70, GARDEN.height - 70) }];
-    this.destination = this.path.at(-1) || null;
-  }
+  moveToScreen() { return false; }
 
   nearest() {
     const entities = this.getEntities();
@@ -352,22 +386,88 @@ export class World {
   }
 
   getEntities() {
-    if (this.scene === 'nest') return [...this.npcs, ...this.nestEntities];
-    return [...this.outsideEntities.filter(entity => entity.available !== false), ...(this.predator ? [this.predator] : [])];
+    const entities = this.scene === 'nest' ? [...this.npcs, ...this.nestEntities] : this.scene === 'outside' ? this.outsideEntities : this.regionEntities[this.scene];
+    return [...entities.filter(entity => entity.available !== false && !(this.scene === 'prison' && entity.type === 'portal' && !this.passageOpen)), ...(this.predator?.scene === this.scene ? [this.predator] : [])];
   }
 
-  guideTo(id) {
-    const all = [...this.npcs.map(n => ({ ...n, scene: 'nest' })), ...this.nestEntities, ...this.outsideEntities, ...(this.predator ? [this.predator] : [])];
-    const matches = all.filter(entity => (entity.id === id || entity.kind === id) && entity.available !== false);
-    matches.sort((a, b) => Number(b.scene === this.scene) - Number(a.scene === this.scene) || distance(this.player, a) - distance(this.player, b));
-    let target = matches[0];
-    if (!target) return false;
-    const otherScene = target.scene !== this.scene;
-    if (otherScene) target = this.scene === 'nest' ? this.nestEntities[0] : this.outsideEntities[0];
-    this.guide = { id, target, otherScene };
-    if (this.scene === 'nest') this.path = this.graph.route(this.player, target);
-    this.destination = target;
-    return true;
+  guideTo() { return false; }
+
+  currentGraph() { return this.scene === 'nest' ? this.graph : this.regionGraphs[this.scene]; }
+
+  setActivity(entity) { this.activity = entity ? { ...entity } : null; }
+
+  commandFollowers(enabled) {
+    this.queenCommand = !!enabled && !!this.state?.cleared;
+    for (const worker of this.gardenWorkers) { worker.path = []; worker.pause = 0; }
+  }
+
+  emote(name) { this.emoteName = name; this.emoteUntil = this.time + 3; }
+
+  toggleHomeTrail() {
+    if (this.scene !== 'outside') return false;
+    this.homeTrail = !this.homeTrail; this.refreshHomeTrail(); return this.homeTrail;
+  }
+
+  refreshHomeTrail() {
+    this.homePath = [];
+    if (!this.homeTrail || this.scene !== 'outside') return;
+    let best = Infinity;
+    for (const edge of this.trailGraph.edges) {
+      const point = projectSegment(this.player, this.trailGraph.nodes[edge.a], this.trailGraph.nodes[edge.b]);
+      const steps = Math.ceil(distance(this.player, point) / 15);
+      let clear = true;
+      for (let i = 1; i <= steps; i++) if (!this.walkable({ x: lerp(this.player.x, point.x, i / steps), y: lerp(this.player.y, point.y, i / steps) })) { clear = false; break; }
+      if (!clear) continue;
+      const path = [point, ...this.trailGraph.route(point, this.outsideEntities[0])];
+      const cost = path.reduce((sum, p, i) => sum + distance(i ? path[i - 1] : this.player, p), 0);
+      if (cost < best) { best = cost; this.homePath = [{ x: this.player.x, y: this.player.y }, ...path]; }
+    }
+  }
+
+  walkable(point, scene = this.scene) {
+    if (scene === 'prison' && !this.passageOpen && point.x > 570) return false;
+    if (scene === 'outside') {
+      if (point.x < 65 || point.x > GARDEN.width - 65 || point.y < 70 || point.y > GARDEN.height - 70) return false;
+      return !GARDEN_OBSTACLES.some(obstacle => {
+        const dx = point.x - obstacle.x, dy = point.y - obstacle.y, a = obstacle.angle || 0;
+        return ((dx * Math.cos(a) + dy * Math.sin(a)) / (obstacle.rx + 10)) ** 2 + ((dy * Math.cos(a) - dx * Math.sin(a)) / (obstacle.ry + 10)) ** 2 < 1;
+      });
+    }
+    const graph = this.currentGraph();
+    return graph.rooms.some(room => ((point.x - room.x) / (room.rx - 14)) ** 2 + ((point.y - room.y) / (room.ry - 14)) ** 2 <= 1)
+      || graph.edges.some(edge => (!edge.locked || graph.open) && distance(point, projectSegment(point, graph.nodes[edge.a], graph.nodes[edge.b])) <= 31);
+  }
+
+  blockedRoom(point) {
+    if (this.scene !== 'nest') return null;
+    return NEST_ROOMS.find(room => (ROOM_RANKS[room.id] || 0) > this.player.rank && ((point.x - room.x) / (room.rx + 4)) ** 2 + ((point.y - room.y) / (room.ry + 4)) ** 2 < 1);
+  }
+
+  moveDirect(dx, dy) {
+    const originalScene = this.scene, start = { x: this.player.x, y: this.player.y };
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 5));
+    const canMove = point => {
+      const room = this.blockedRoom(point);
+      if (room) {
+        if (!this.trespassLatch.has(room.id)) { this.trespassLatch.add(room.id); this.onNotice(`${room.name} · ${RANK_LABELS[ROOM_RANKS[room.id]]}부터 출입 가능`); this.onTrespass(room); }
+        return false;
+      }
+      return this.walkable(point);
+    };
+    for (let i = 0; i < steps && this.scene === originalScene; i++) {
+      const sx = dx / steps, sy = dy / steps;
+      const both = { x: this.player.x + sx, y: this.player.y + sy };
+      if (canMove(both) && this.scene === originalScene) Object.assign(this.player, both);
+      else {
+        if (this.scene !== originalScene) break;
+        const xOnly = { x: this.player.x + sx, y: this.player.y };
+        if (canMove(xOnly) && this.scene === originalScene) this.player.x = xOnly.x;
+        if (this.scene !== originalScene) break;
+        const yOnly = { x: this.player.x, y: this.player.y + sy };
+        if (canMove(yOnly) && this.scene === originalScene) this.player.y = yOnly.y;
+      }
+    }
+    this.player.moving = this.scene === originalScene && distance(start, this.player) > .1;
   }
 
   recruit(count = 2) {
@@ -392,17 +492,41 @@ export class World {
   }
 
   setDug(value) {
-    this.dug = Math.max(0, Number(value) || 0);
-    const open = this.dug >= 5;
-    if (this.graph.open !== open) { this.graph.open = open; this.nestCache = null; }
+    this.dug = clamp(Number(value) || 0, 0, DIG_LIMIT);
+    const open = this.dug >= DIG_LIMIT || this.state?.campaign?.개통 === true;
+    this.graph = new ColonyGraph(); this.graph.open = open;
+    const path = this.digPath();
+    let previous = this.graph.nodes.findIndex(node => node.id === 'dig');
+    for (const point of path) {
+      const index = this.graph.nodes.push({ ...point }) - 1;
+      this.graph.edges.push({ a: previous, b: index, locked: false }); previous = index;
+    }
+    if (open) { this.graph.rooms = [...NEST_ROOMS, NEW_ROOM]; Object.assign(this.graph.nodes[previous], NEW_ROOM); }
+    Object.assign(this.nestEntities.find(entity => entity.id === 'dig'), path.at(-1));
+    this.nestEntities.find(entity => entity.id === 'dig').name = open ? '새싹의 방 보강하기' : '새 통로 파기';
+    this.nestCache = null;
+  }
+
+  digPath(progress = this.graph.open ? 1 : this.dug / DIG_LIMIT) {
+    let length = 0;
+    for (let i = 1; i < DIG_PATH.length; i++) length += distance(DIG_PATH[i - 1], DIG_PATH[i]);
+    let remaining = length * progress;
+    const path = [{ ...DIG_PATH[0] }];
+    for (let i = 1; i < DIG_PATH.length && remaining > 0; i++) {
+      const a = DIG_PATH[i - 1], b = DIG_PATH[i], segment = distance(a, b), fraction = Math.min(1, remaining / segment);
+      path.push({ x: lerp(a.x, b.x, fraction), y: lerp(a.y, b.y, fraction) }); remaining -= segment;
+    }
+    return path;
   }
 
   dig() {
-    this.setDug(this.dug + 1); this.digAnimation = 1.3;
     const spot = this.nestEntities.find(entity => entity.id === 'dig');
+    if (this.scene !== 'nest' || distance(this.player, spot) > 115 || this.graph.open) return { dug: this.dug, opened: false };
+    this.setDug(this.dug + 1); this.digAnimation = 1.3;
     this.burst(spot.x + 40, spot.y + 10, '#b4865b', 16);
-    if (this.dug === 5) this.onNotice('새 통로 완성! 버섯밭과 씨앗 장터 사이에 지름길이 열렸어요.');
-    return { dug: this.dug, opened: this.dug === 5 };
+    const opened = this.dug === DIG_LIMIT;
+    if (opened) { if (this.state?.campaign) this.state.campaign.개통 = true; this.onNotice('직접 개통했어요! 새싹의 방과 버섯밭 지름길이 열렸어요.'); }
+    return { dug: this.dug, opened };
   }
 
   setEvent(event) {
@@ -412,16 +536,18 @@ export class World {
     if (event && /predator|beetle|spider|defend|포식|거미|딱정/.test(kind)) {
       if (!this.predator || previousKey !== nextKey) {
         const origin = this.scene === 'outside' ? this.player : { x: 1210, y: 1510 };
+        const spawn = Array.from({length:8},(_,i)=>({x:clamp(origin.x+Math.cos(i*TAU/8-.5)*190,150,GARDEN.width-150),y:clamp(origin.y+Math.sin(i*TAU/8-.5)*190,150,GARDEN.height-150)})).find(point=>this.walkable(point,'outside')) || REGIONS.outside.entry;
         this.predator = { id: 'predator', type: 'station', kind: 'guard', name: '포식자 밀어내기',
-          x: clamp(origin.x + 170, 150, GARDEN.width - 150), y: clamp(origin.y - 100, 150, GARDEN.height - 150), scene: 'outside' };
+          ...spawn, scene: 'outside' };
         this.lastEventProgress = 0;
+        this.guardAnts = Array.from({ length: 4 }, (_, i) => ({ x: 1210 + i * 12, y: 1390, scene: 'outside', size: .85, hat: 'helmet', rank: 2, color: '#956442', phase: i, path: [], repath: 0, moving: false }));
       }
       const progress = Number(event.progress) || 0;
       if (progress > (this.lastEventProgress || 0)) {
         this.predatorRecoil = .6; this.burst(this.predator.x, this.predator.y + 25, '#e6d094', 12);
       }
       this.lastEventProgress = progress;
-    } else { this.predator = null; this.predatorRecoil = 0; }
+    } else { this.predator = null; this.predatorRecoil = 0; this.guardAnts = []; }
     this.event = event;
     if (event && previousKey !== nextKey) this.eventStarted = this.time;
   }
@@ -433,13 +559,16 @@ export class World {
   applySnapshot(data) {
     if (!data || !Number.isFinite(Number(data.x)) || !Number.isFinite(Number(data.y))) return;
     this.setDug(data.dug || 0); this.ambientWork = clamp(Number(data.ambientWork) || 0, 0, 159);
-    this.scene = data.scene === 'outside' ? 'outside' : 'nest';
+    this.scene = REGIONS[data.scene] ? data.scene : 'nest';
     const x = Number(data.x), y = Number(data.y);
-    const point = x === 0 && y === 0 ? { x: 1235, y: 265 } : { x, y };
-    if (this.scene === 'nest') Object.assign(this.player, this.graph.snap(point).point);
-    else Object.assign(this.player, { x: clamp(x, 65, GARDEN.width - 65), y: clamp(y, 70, GARDEN.height - 70) });
+    const point = x === 0 && y === 0 ? (this.scene === 'nest' ? { x: 1235, y: 265 } : REGIONS[this.scene].entry) : { x, y };
+    if (this.scene !== 'outside') Object.assign(this.player, this.walkable(point) ? point : this.currentGraph().snap(point).point);
+    else Object.assign(this.player, this.walkable(point) ? point : REGIONS.outside.entry);
+    // Existing saves may stand in a room newly restricted by this update.
+    if (this.blockedRoom(this.player) || !this.walkable(this.player)) Object.assign(this.player, this.scene === 'nest' ? { x: 1235, y: 265 } : REGIONS[this.scene].entry);
     this.path = []; this.followers = []; this.camera.x = this.player.x; this.camera.y = this.player.y + 30;
     this.recruit(clamp(Number(data.followers) || 0, 0, 5));
+    this.commandFollowers(this.state?.campaign?.집결);
   }
 
   burst(x, y, color, count) {
@@ -461,30 +590,32 @@ export class World {
   }
 
   update(dt) {
+    const elapsed = clamp(dt, 0, 1);
     dt = clamp(dt, 0, .08); this.time += dt;
     if (this.predatorRecoil > 0) this.predatorRecoil = Math.max(0, this.predatorRecoil - dt);
-    if (!this.graph.open) {
-      this.ambientWork += dt;
+    if (!this.graph.open && this.dug < DIG_LIMIT - 1) {
+      this.ambientWork += elapsed;
       if (this.ambientWork >= 160) {
         this.ambientWork -= 160; this.setDug(this.dug + 1);
-        if (this.graph.open) this.onNotice('굴착조가 새 길을 완성했어요! 버섯밭과 장터가 가까워졌어요.');
+        if (this.dug === DIG_LIMIT - 1) this.onNotice('굴착조가 마지막 흙벽 앞에 도착했어요. 공사장에서 직접 개통해 주세요.');
       }
     }
     if (this.digAnimation > 0) this.digAnimation -= dt;
-    const speed = 185 + this.player.rank * 10;
+    const speed = 185 + this.player.rank * 10 + (this.state?.campaign?.강화?.이동 || 0) * 15;
     const inputLength = Math.hypot(this.input.x, this.input.y);
     if (inputLength > .05) {
-      if (this.scene === 'outside') {
-        this.player.x = clamp(this.player.x + this.input.x * speed * dt, 65, GARDEN.width - 65);
-        this.player.y = clamp(this.player.y + this.input.y * speed * dt, 70, GARDEN.height - 70);
-        this.player.angle = Math.atan2(this.input.y, this.input.x); this.player.moving = true;
-      } else {
-        const next = { x: this.player.x + this.input.x * speed * dt, y: this.player.y + this.input.y * speed * dt };
-        const projected = this.graph.snap(next).point;
-        this.player.moving = distance(this.player, projected) > .2; Object.assign(this.player, projected);
-      }
+      this.releasedInput = 0;
+      const dx = this.input.x * speed * dt, dy = this.input.y * speed * dt;
+      this.moveDirect(this.scene === 'outside' ? clamp(this.player.x + dx, 65, GARDEN.width - 65) - this.player.x : dx,
+        this.scene === 'outside' ? clamp(this.player.y + dy, 70, GARDEN.height - 70) - this.player.y : dy);
+      this.player.angle = Math.atan2(this.input.y, this.input.x);
       if (Math.abs(this.input.x) > .1) this.player.facing = this.input.x >= 0 ? 1 : -1;
-    } else this.moveAlong(this.player, this.path, speed, dt, this.scene === 'outside');
+    } else { this.player.moving = false; this.releasedInput += dt; if (this.releasedInput > .65) this.trespassLatch.clear(); }
+    this.path = [];
+    for (const id of this.trespassLatch) {
+      const room = NEST_ROOMS.find(item => item.id === id);
+      if (distance(this.player, room) > room.rx + 100) this.trespassLatch.delete(id);
+    }
     for (const [id, until] of this.resourceTimers) if (this.time >= until) {
       this.resources.find(resource => resource.id === id).available = true; this.resourceTimers.delete(id);
     }
@@ -516,8 +647,14 @@ export class World {
           this.burst(worker.x + 20, worker.y + 8, '#aa8057', 2);
         }
       }
-    } else {
+    } else if (this.scene === 'outside') {
       for (const [i, worker] of this.gardenWorkers.entries()) {
+        if (this.queenCommand) {
+          const angle = i * 2.4, radius = 65 + Math.floor(i / 5) * 25;
+          const target = { x: this.player.x + Math.cos(angle) * radius, y: this.player.y + Math.sin(angle) * radius };
+          worker.path = distance(worker, target) > 25 ? [target] : [];
+          this.moveAlong(worker, worker.path, speed + 10, dt, true); continue;
+        }
         if (!worker.path.length) {
           worker.pause -= dt;
           if (worker.pause <= 0) {
@@ -530,19 +667,51 @@ export class World {
         this.moveAlong(worker, worker.path, worker.speed, dt, true);
       }
     }
-    this.followers.forEach((follower, i) => {
-      const preceding = i ? this.followers[i - 1] : this.player;
-      const d = distance(follower, preceding); follower.repath -= dt;
-      if (d > 60 && follower.repath <= 0) {
-        follower.path = this.scene === 'nest' ? this.graph.route(follower, preceding) : [{ x: preceding.x, y: preceding.y }];
-        follower.repath = .45;
+    for (const worker of this.regionWorkers[this.scene] || []) {
+      if (!worker.path.length) {
+        worker.pause -= dt;
+        if (worker.pause <= 0) {
+          const rooms=REGIONS[this.scene].rooms;worker.shiftIndex=(worker.shiftIndex+1)%rooms.length;
+          const room=rooms[worker.shiftIndex];worker.path=this.currentGraph().route(worker,{x:room.x,y:room.y+18});worker.pause=3+this.random()*4;
+        }
       }
-      if (d <= 48) follower.path = [];
+      this.moveAlong(worker,worker.path,worker.speed,dt);
+    }
+    this.followers.forEach((follower, i) => {
+      const preceding = this.activity ? { x: this.activity.x + Math.cos(i * 2.4 + this.time * .7) * 26, y: this.activity.y + Math.sin(i * 2.4 + this.time * .7) * 20 } : i ? this.followers[i - 1] : this.player;
+      const d = distance(follower, preceding); follower.repath -= dt;
+      if (d > (this.activity ? 5 : 60) && follower.repath <= 0) {
+        follower.path = this.scene !== 'outside' ? this.currentGraph().route(follower, preceding) : [{ x: preceding.x, y: preceding.y }];
+        follower.repath = this.activity ? .12 : .45;
+      }
+      if (d <= (this.activity ? 4 : 48)) follower.path = [];
+      if (this.activity) follower.carry = this.activity.kind || 'seed';
       this.moveAlong(follower, follower.path, speed + 17, dt, this.scene === 'outside');
     });
+    if (this.predator) {
+      const remaining = Number(this.event?.remaining ?? 180);
+      if (remaining < 20 && this.predator.scene === 'outside') {
+        Object.assign(this.predator, { x: 1250, y: 255, scene: 'nest' });
+        this.guardAnts.forEach((ant, i) => { Object.assign(ant, { x: 1300 + i * 10, y: 270, scene: 'nest', path: [] }); });
+      }
+      if (remaining < 55 && this.predator.scene === 'outside') this.moveAlong(this.predator, [{ x: 1210, y: 1390 }], 90, dt, true);
+      else if (this.predator.scene === 'nest') {
+        if (!this.predator.path?.length) this.predator.path = this.graph.route(this.predator, NEST_ROOMS.find(room => room.id === 'meeting'));
+        this.moveAlong(this.predator, this.predator.path, 24, dt);
+      }
+      this.guardAnts.forEach((ant, i) => {
+        ant.repath -= dt;
+        const angle = i * TAU / 4 + Math.sin(this.time * 3 + i) * .12;
+        const target = { x: this.predator.x + Math.cos(angle) * 72, y: this.predator.y + Math.sin(angle) * 55 };
+        if (ant.repath <= 0) { ant.path = ant.scene === 'nest' ? this.graph.route(ant, target) : [target]; ant.repath = .3; }
+        this.moveAlong(ant, ant.path, 165, dt, ant.scene === 'outside');
+        if (distance(ant, this.predator) < 95) { ant.moving = true; if (Math.floor(this.time * 5 + i) !== ant.lastHit) { ant.lastHit = Math.floor(this.time * 5 + i); this.burst(ant.x, ant.y, '#e4c874', 1); } }
+      });
+    }
+    if (this.homeTrail && (!this.nextTrailUpdate || this.time > this.nextTrailUpdate)) { this.refreshHomeTrail(); this.nextTrailUpdate = this.time + .6; }
     for (const p of this.particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += dt * 130; }
     this.particles = this.particles.filter(p => p.life > 0);
-    const bounds = this.scene === 'nest' ? NEST : GARDEN;
+    const bounds = REGIONS[this.scene];
     const halfW = Math.min(bounds.width / 2, this.width / this.zoom / 2), halfH = Math.min(bounds.height / 2, this.height / this.zoom / 2);
     const targetX = clamp(this.player.x, halfW, bounds.width - halfW);
     const targetY = clamp(this.player.y + 20, halfH, bounds.height - halfH);
@@ -585,7 +754,7 @@ export class World {
         const a = this.graph.nodes[edge.a], b = this.graph.nodes[edge.b];
         line(ctx, [[a.x, a.y + yOffset], [b.x, b.y + yOffset]], color, width);
       }
-      for (const room of NEST_ROOMS) ellipse(ctx, room.x, room.y + yOffset, room.rx + (width - 90) / 2, room.ry + (width - 90) / 2, color);
+      for (const room of this.graph.rooms) ellipse(ctx, room.x, room.y + yOffset, room.rx + (width - 90) / 2, room.ry + (width - 90) / 2, color);
     };
     strokeNetwork('#191e1c66', 116, 9);
     strokeNetwork('#69553b', 104);
@@ -594,7 +763,7 @@ export class World {
     // The chimney meets the chamber ceiling, leaving its carved label visible.
     line(ctx, [[1218, 235], [1218, 115], [1245, 80]], '#786442', 63);
     line(ctx, [[1218, 235], [1218, 115], [1245, 80]], '#cbb17a', 47);
-    for (const room of NEST_ROOMS) {
+    for (const room of this.graph.rooms) {
       const glow = ctx.createRadialGradient(room.x - 20, room.y - 30, 10, room.x, room.y, room.rx);
       glow.addColorStop(0, '#edd8a0'); glow.addColorStop(.6, '#d1b27c'); glow.addColorStop(1, '#b69765');
       ellipse(ctx, room.x, room.y - 3, room.rx - 9, room.ry - 8, glow);
@@ -629,7 +798,20 @@ export class World {
   drawRoomDecor(ctx, room, random) {
     const { x, y, decor } = room;
     const floor = y + 47;
-    if (['pantry', 'market'].includes(decor)) {
+    if (decor === 'prison') {
+      leaf(ctx, x - 100, floor, 50, '#777c58', 0);
+      for (let i = 0; i < 8; i++) line(ctx, [[x - 170 + i * 48, y - 130], [x - 170 + i * 48, y - 78]], '#444b43', 7);
+      line(ctx, [[x - 185, y - 86], [x + 180, y - 86]], '#8a8b77', 6);
+    } else if (decor === 'water') {
+      line(ctx, [[x - 115, y + 25], [x - 25, y + 10], [x + 90, y + 36]], '#4b6663', 35);
+      line(ctx, [[x - 115, y + 25], [x - 25, y + 10], [x + 90, y + 36]], '#91b4a7', 18);
+    } else if (decor === 'crack') {
+      line(ctx, [[x - 45, y - 60], [x - 20, y - 35], [x - 31, y - 15], [x + 2, y + 12]], '#34423c', 7);
+      for (let i = 0; i < 5; i++) ellipse(ctx, x - 50 + i * 22, y + 35, 13, 7, '#7f826c');
+    } else if (decor === 'gate' || decor === 'lift') {
+      line(ctx, [[x - 52, y + 35], [x - 52, y - 55], [x + 52, y - 55], [x + 52, y + 35]], '#686348', 12);
+      for (let i = 0; i < 4; i++) line(ctx, [[x - 40 + i * 27, y - 40], [x - 40 + i * 27, y + 35]], '#b6a879', 5);
+    } else if (['pantry', 'market'].includes(decor)) {
       for (let row = 0; row < 2; row++) for (let i = 0; i < 5; i++) {
         const px = x - 105 + i * 44, py = floor - row * 29;
         ellipse(ctx, px, py, 19, 9, '#836a4266');
@@ -699,13 +881,7 @@ export class World {
       const x = random() * canvas.width, y = random() * canvas.height;
       ellipse(ctx, x, y, 22 + random() * 74, 16 + random() * 48, ['#9fa57535', '#5a74483b', '#bfd09317', '#4c654a24'][i % 4], random() * TAU);
     }
-    const trails = [
-      [[1210, 1390], [1150, 1190], [920, 1150], [530, 1100], [440, 880], [620, 550]],
-      [[1210, 1390], [1510, 1450], [1770, 1420], [1980, 1250], [2070, 900], [2090, 470]],
-      [[920, 1150], [1100, 970], [1190, 740], [1150, 500]],
-      [[1100, 970], [1500, 990], [1570, 760], [1700, 610], [2090, 470]],
-      [[1210, 1390], [1010, 1530], [790, 1580], [510, 1570]],
-    ];
+    const trails = GARDEN_TRAILS;
     for (const points of trails) { line(ctx, points, '#718157', 168); line(ctx, points, '#b2ad78', 130); line(ctx, points, '#c2b685', 104); }
     for (let i = 0; i < 2600; i++) {
       const x = random() * canvas.width, y = random() * canvas.height;
@@ -787,33 +963,23 @@ export class World {
   }
 
   drawNavigation(ctx) {
-    if (this.scene === 'nest' && this.path.length) {
-      ctx.setLineDash([2, 15]); ctx.lineDashOffset = -this.time * 13;
-      line(ctx, [[this.player.x, this.player.y + 14], ...this.path.map(p => [p.x, p.y + 14])], '#fdf1b899', 3); ctx.setLineDash([]);
-    }
-    if (!this.guide) return;
-    const target = this.guide.target;
-    if (this.scene === 'outside') {
-      const angle = Math.atan2(target.y - this.player.y, target.x - this.player.x);
-      const d = distance(this.player, target);
-      for (let i = 1; i < Math.min(13, d / 30); i++) {
-        const alpha = .5 * (1 - i / 15);
-        ellipse(ctx, this.player.x + Math.cos(angle) * i * 30, this.player.y + Math.sin(angle) * i * 30, 3, 3, `rgba(255,241,178,${alpha})`);
+    if (!this.homeTrail || this.scene !== 'outside') return;
+    for (let i = 1; i < this.homePath.length; i++) {
+      const a = this.homePath[i - 1], b = this.homePath[i], length = distance(a, b);
+      for (let d = 0; d < length; d += 22) {
+        const x = lerp(a.x, b.x, d / length), y = lerp(a.y, b.y, d / length);
+        if (!this.visible(x, y, 10)) continue;
+        const alpha = .35 + Math.sin(this.time * 2 - d * .02 - i) * .15;
+        ellipse(ctx, x, y, 8, 6, `rgba(211,235,152,${alpha * .35})`);
+        ellipse(ctx, x, y, 2.8, 2.8, `rgba(237,250,182,${alpha + .3})`);
       }
-      const ax = this.player.x + Math.cos(angle) * 95, ay = this.player.y + Math.sin(angle) * 95;
-      ctx.save(); ctx.translate(ax, ay); ctx.rotate(angle);
-      line(ctx, [[-8, -7], [0, 0], [-8, 7]], '#fff0b7', 3); ctx.restore();
-    }
-    if (this.visible(target.x, target.y)) {
-      ctx.beginPath(); ctx.ellipse(target.x, target.y + 12, 46 + Math.sin(this.time * 3) * 3, 23, 0, 0, TAU);
-      ctx.strokeStyle = '#fff0b999'; ctx.lineWidth = 2; ctx.stroke();
     }
   }
 
   drawEvent(ctx) {
-    if (!this.event || this.scene !== 'outside') return;
+    if (!this.event) return;
     const kind = typeof this.event === 'string' ? this.event : `${this.event.kind || ''} ${this.event.type || ''} ${this.event.id || ''}`;
-    if (/rain|flood|storm|repair|비|홍수|폭우/.test(kind || '')) {
+    if (this.scene === 'outside' && /rain|flood|storm|repair|비|홍수|폭우/.test(kind || '')) {
       const left = this.camera.x - this.width / this.zoom / 2, top = this.camera.y - this.height / this.zoom / 2;
       ctx.fillStyle = '#49707322'; ctx.fillRect(left - 20, top - 20, this.width / this.zoom + 40, this.height / this.zoom + 40);
       for (let i = 0; i < 80; i++) {
@@ -822,7 +988,7 @@ export class World {
         line(ctx, [[x, y], [x - 5, y + 18]], '#c4e0cf66', 1.4);
       }
     }
-    if (this.predator && /predator|beetle|spider|defend|포식|거미|딱정/.test(kind || '')) {
+    if (this.predator?.scene === this.scene && /predator|beetle|spider|defend|포식|거미|딱정/.test(kind || '')) {
       const recoil = this.predatorRecoil || 0;
       const x = this.predator.x + Math.sin(this.time * 16) * recoil * 15, y = this.predator.y - recoil * 8;
       ctx.save(); ctx.translate(x, y);
@@ -838,6 +1004,74 @@ export class World {
     }
   }
 
+  buildRegion(scene) {
+    const region = REGIONS[scene], graph = this.regionGraphs[scene], canvas = this.makeCache(region), ctx = canvas.getContext('2d'), random = seededRandom(scene.length * 761);
+    const [soil, wall, floor] = region.palette;
+    ctx.fillStyle = soil; ctx.fillRect(0, 0, region.width, region.height);
+    for (let i = 0; i < 1000; i++) ellipse(ctx, random() * region.width, random() * region.height, 2 + random() * 3, 1.5, '#d9ca9720');
+    for (const [color, width] of [[wall, 101], [floor, 79]]) {
+      for (const edge of graph.edges) { if (scene === 'prison' && !this.passageOpen) continue; const a = graph.nodes[edge.a], b = graph.nodes[edge.b]; line(ctx, [[a.x, a.y], [b.x, b.y]], color, width); }
+      for (const room of graph.rooms) { if (scene === 'prison' && !this.passageOpen && room.id === 'crack') continue; ellipse(ctx, room.x, room.y, room.rx + (width - 90) / 2, room.ry + (width - 90) / 2, color); }
+    }
+    for (const room of graph.rooms) {
+      if (scene === 'prison' && !this.passageOpen && room.id === 'crack') continue;
+      ctx.save(); ctx.beginPath(); ctx.ellipse(room.x, room.y, room.rx - 12, room.ry - 12, 0, 0, TAU); ctx.clip();
+      this.drawRoomDecor(ctx, room, random); ctx.restore();
+      const w = room.name.length * 12 + 22;
+      ctx.fillStyle = '#283a32dd'; ctx.beginPath(); ctx.roundRect(room.x - w / 2, room.y - room.ry + 14, w, 28, 7); ctx.fill();
+      label(ctx, room.name, room.x, room.y - room.ry + 28, '#f6e9bd', 12);
+    }
+    // Keep only two offscreen regional canvases; the garden and nest have their own caches.
+    if (this.regionCaches.size >= 2) this.regionCaches.delete(this.regionCaches.keys().next().value);
+    this.regionCaches.set(scene, canvas);
+  }
+
+  drawRegionEntities(ctx) {
+    const entities = [...(this.regionEntities[this.scene] || []), ...(this.scene === 'nest' ? this.nestEntities.filter(entity => entity.type === 'story') : [])];
+    for (const entity of entities) {
+      if (this.scene === 'prison' && entity.type === 'portal' && !this.passageOpen) continue;
+      if (!this.visible(entity.x, entity.y)) continue;
+      const { x, y, appearance } = entity;
+      if (appearance === 'door') {
+        ellipse(ctx, x, y, 42, 33, '#293b33'); ellipse(ctx, x, y - 3, 30, 23, '#182a24');
+        line(ctx, [[x - 40, y + 15], [x - 35, y - 33], [x + 35, y - 33], [x + 40, y + 15]], '#c5b483', 8);
+      } else if (appearance === 'mushroom') mushroom(ctx, x, y, 1.2, '#8bbfb1');
+      else if (appearance === 'crack') line(ctx, [[x - 8, y - 22], [x + 6, y - 8], [x - 5, y + 7], [x + 9, y + 20]], '#243732', 6);
+      else if (appearance === 'record') { leaf(ctx, x, y, 29, '#d5cc91', 0); for (let i = 0; i < 3; i++) line(ctx, [[x - 10, y - 9 + i * 7], [x + 12, y - 9 + i * 7]], '#6a7652', 2); }
+      else if (appearance === 'flag') { line(ctx, [[x, y + 15], [x, y - 60]], '#645239', 6); leaf(ctx, x + 22, y - 48, 28, this.state?.campaign?.원정 ? '#96b773' : '#ba8760', 0); }
+      else if (appearance === 'shop') { leaf(ctx, x, y - 20, 45, '#8fa66b', 0); label(ctx, '씨앗 교환', x, y + 3, '#2d4233', 12); }
+      else if (!['ant', 'queen'].includes(appearance)) {
+        ellipse(ctx, x, y + 8, 24, 12, '#4c604c'); label(ctx, appearance === 'water' ? '≈' : '◇', x, y, '#e2d9aa', 25);
+      }
+      label(ctx, entity.name, x, y - (appearance === 'queen' ? 82 : 52), '#fff0cd', 13);
+    }
+    if (this.scene === 'nest') {
+      for (const room of NEST_ROOMS) if (ROOM_RANKS[room.id] && ROOM_RANKS[room.id] > this.player.rank && this.visible(room.x, room.y)) {
+        ctx.beginPath(); ctx.ellipse(room.x, room.y, room.rx + 4, room.ry + 4, 0, 0, TAU); ctx.strokeStyle = '#ca8c617d'; ctx.lineWidth = 6; ctx.stroke();
+        const text = `${RANK_LABELS[ROOM_RANKS[room.id]]}부터 출입`;
+        ctx.fillStyle = '#713e31ec'; ctx.beginPath(); ctx.roundRect(room.x - 92, room.y - 25, 184, 32, 8); ctx.fill();
+        label(ctx, text, room.x, room.y - 9, '#fff0d7', 13);
+      }
+      const front = this.nestEntities.find(entity => entity.id === 'dig');
+      if (!this.graph.open && this.visible(front.x, front.y)) {
+        ellipse(ctx, front.x + 23, front.y + 8, 28, 32, '#826649');
+        label(ctx, this.dug === DIG_LIMIT - 1 ? '마지막 흙벽 · 직접 개통' : `굴착 ${this.dug} / ${DIG_LIMIT}`, front.x, front.y - 44, '#fff0cf', 13);
+        // The construction crew works at the moving face, not in the old room.
+        for (let i = 0; i < 3; i++) drawAnt(ctx, { x: front.x - 27 - i * 15, y: front.y + 11 + i * 7, size: .62, hat: 'helmet', facing: 1, moving: true, phase: i }, this.time);
+      }
+    }
+  }
+
+  drawExcavation(ctx) {
+    if(this.scene!=='nest'||this.graph.open)return;
+    const manual=this.activity?.kind==='dig',progress=manual?this.activity.progress||0:this.dug<7?this.ambientWork/160:0;
+    if(progress<=0)return;
+    const path=this.digPath(Math.min(1,(this.dug+progress)/DIG_LIMIT)).map(p=>[p.x,p.y]);
+    line(ctx,path,'#69553b',91);line(ctx,path,'#b39361',78);line(ctx,path,'#c4a474',63);
+    const [x,y]=path.at(-1);
+    for(let i=0;i<5;i++)ellipse(ctx,x+Math.sin(this.time*10+i)*14,y+Math.cos(this.time*7+i)*12,3,2,'#9e7549');
+  }
+
   render() {
     const ctx = this.ctx;
     if (!ctx || !this.width || !this.height) return;
@@ -845,12 +1079,34 @@ export class World {
     ctx.fillStyle = this.scene === 'nest' ? '#303129' : '#7c8b5d'; ctx.fillRect(0, 0, this.width, this.height);
     ctx.save(); ctx.translate(this.width / 2, this.height * .52); ctx.scale(this.zoom, this.zoom); ctx.translate(-this.camera.x, -this.camera.y);
     if (this.scene === 'nest') { if (!this.nestCache) this.buildNest(); ctx.drawImage(this.nestCache, 0, 0); }
-    else { if (!this.gardenCache) this.buildGarden(); ctx.drawImage(this.gardenCache, 0, 0); }
+    else if (this.scene === 'outside') { if (!this.gardenCache) this.buildGarden(); ctx.drawImage(this.gardenCache, 0, 0); }
+    else { if (!this.regionCaches.has(this.scene)) this.buildRegion(this.scene); ctx.drawImage(this.regionCaches.get(this.scene), 0, 0); }
+    this.drawExcavation(ctx);
+    if (this.scene === 'outside') {
+      const phase = Math.floor((this.state?.stats?.playSeconds || 0) / 240) % 4;
+      ctx.fillStyle = ['#ffe9b00d', '#f7e7ad00', '#e6936038', '#1f304f79'][phase]; ctx.fillRect(0, 0, GARDEN.width, GARDEN.height);
+    }
     this.drawNavigation(ctx);
     if (this.scene === 'outside') for (const resource of this.resources) if (resource.available && this.visible(resource.x, resource.y)) this.drawResource(ctx, resource);
-    const actors = this.scene === 'nest' ? [...this.workers, ...this.npcs, ...this.followers, this.player] : [...this.gardenWorkers, ...this.followers, this.player];
+    const storyAnts = (this.regionEntities[this.scene] || []).filter(entity => entity.appearance === 'ant' || entity.appearance === 'queen').map((entity, i) => ({ ...entity, size: entity.appearance === 'queen' ? 1.8 : 1, crown: entity.appearance === 'queen', hat: ['helmet', 'leaf', 'flower'][i % 3], moving: entity.id === '은빛전투', facing: -1, phase: i }));
+    const allies = ['throne', 'frontier'].includes(this.scene) ? (this.state?.campaign?.동맹 || []).map((name, i) => ({ name, x: this.player.x - 45 - i * 30 + Math.sin(this.time * 4 + i) * 7, y: this.player.y + 35 + i * 6, facing: 1, size: .9, moving: true, hat: ['helmet', 'flower', 'leaf'][i], rank: 2, phase: i })) : [];
+    const locals = this.scene === 'nest' ? [...this.workers, ...this.npcs] : this.scene === 'outside' ? this.gardenWorkers : [...storyAnts,...(this.regionWorkers[this.scene]||[])];
+    this.player.emote = this.emoteUntil > this.time ? this.emoteName : null;
+    const actors = [...locals, ...this.guardAnts.filter(ant => ant.scene === this.scene), ...allies, ...this.followers, this.player];
     actors.sort((a, b) => a.y - b.y);
     for (const actor of actors) if (this.visible(actor.x, actor.y)) drawAnt(ctx, actor, this.time, this.scene === 'outside', actor === this.player);
+    this.drawRegionEntities(ctx);
+    if (this.bossTelegraph) {
+      const warning = this.bossTelegraph;
+      ellipse(ctx, warning.x, warning.y, warning.radius, warning.radius, '#b6484155');
+      ctx.beginPath(); ctx.arc(warning.x, warning.y, warning.radius, 0, TAU); ctx.lineWidth = 3; ctx.strokeStyle = '#ffb47b'; ctx.stroke();
+      label(ctx, '피하세요!', warning.x, warning.y - warning.radius - 15, '#fff0ce', 16);
+    }
+    if (this.emoteUntil > this.time) {
+      const messages = { 인사: '반가워요!', 위엄: '군락을 위하여!', 기쁨: '함께 해냈어요!', 격려: '너희를 믿어!' };
+      const y = this.player.y - 76 - Math.sin(this.time * 7) * 4;
+      ellipse(ctx, this.player.x, y, 83, 22, '#f3e7c9ef'); label(ctx, messages[this.emoteName] || this.emoteName, this.player.x, y, '#3a523c', 13);
+    }
     if (this.scene === 'nest') {
       for (const npc of this.npcs) if (this.visible(npc.x, npc.y)) {
         const active = distance(this.player, npc) < 150;
@@ -898,20 +1154,24 @@ export class World {
     const width = rect.width || 650, height = rect.height || 420, dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
     canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#2b342b'; ctx.fillRect(0, 0, width, height);
-    const bounds = this.scene === 'nest' ? NEST : GARDEN;
+    const bounds = REGIONS[this.scene];
     const scale = Math.min((width - 36) / bounds.width, (height - 38) / bounds.height);
     const ox = (width - bounds.width * scale) / 2, oy = (height - bounds.height * scale) / 2;
     const detailed = width >= 280 && height >= 200;
     const shortRoomNames = { entrance: '입구', nursery: '알방', meeting: '광장', pantry: '창고', scout: '관측소', rest: '쉼터', workshop: '공방', guard: '경비실', fungus: '버섯밭', clinic: '치료소', library: '도서관', market: '장터', dig: '공사장', garden: '정원', royal: '왕실' };
     const point = (x, y) => [ox + x * scale, oy + y * scale];
-    if (this.scene === 'nest') {
-      for (const edge of this.graph.edges) {
-        if (edge.locked && !this.graph.open) continue;
-        const a = this.graph.nodes[edge.a], b = this.graph.nodes[edge.b]; line(ctx, [point(a.x, a.y), point(b.x, b.y)], '#a19a6b', Math.max(2, 38 * scale));
+    if (this.scene !== 'outside') {
+      const graph = this.currentGraph();
+      for (const edge of graph.edges) {
+        if (this.scene === 'prison' && !this.passageOpen) continue;
+        if (edge.locked && !graph.open) continue;
+        const a = graph.nodes[edge.a], b = graph.nodes[edge.b]; line(ctx, [point(a.x, a.y), point(b.x, b.y)], '#a19a6b', Math.max(2, 38 * scale));
       }
-      for (const room of NEST_ROOMS) {
-        const [x, y] = point(room.x, room.y); ellipse(ctx, x, y, room.rx * scale, room.ry * scale, room.id === 'royal' ? '#cfb475' : '#c2b184');
-        if (detailed) label(ctx, shortRoomNames[room.id], x, y, '#343e2b', Math.max(8, Math.min(11, width / 50)));
+      for (const room of graph.rooms) {
+        if (this.scene === 'prison' && !this.passageOpen && room.id === 'crack') continue;
+        const locked = this.scene === 'nest' && (ROOM_RANKS[room.id] || 0) > this.player.rank;
+        const [x, y] = point(room.x, room.y); ellipse(ctx, x, y, room.rx * scale, room.ry * scale, locked ? '#a17461' : '#c2b184');
+        if (detailed) label(ctx, (this.scene === 'nest' ? shortRoomNames[room.id] : null) || room.name, x, y, '#263326', Math.max(8, Math.min(11, width / 50)));
       }
     } else {
       if (!this.gardenCache) this.buildGarden();
@@ -928,9 +1188,11 @@ export class World {
       const [sx, sy] = point(scout.x, scout.y); ellipse(ctx, sx, sy, detailed ? 6 : 3, detailed ? 6 : 3, '#d8dea1');
       if (detailed) label(ctx, '관측대', sx, sy - 15, '#fff3c7', 10);
     }
-    if (this.guide) {
-      const [x, y] = point(this.guide.target.x, this.guide.target.y);
-      ctx.beginPath(); ctx.arc(x, y, 10, 0, TAU); ctx.strokeStyle = '#f5dd93'; ctx.lineWidth = 2; ctx.stroke();
+    for (const entity of this.regionEntities[this.scene] || []) {
+      if (this.scene === 'prison' && entity.type === 'portal' && !this.passageOpen) continue;
+      if (entity.type !== 'portal' && !detailed) continue;
+      const [x, y] = point(entity.x, entity.y); ellipse(ctx, x, y, 4, 4, entity.type === 'portal' ? '#a3d4cb' : '#e5ce91');
+      if (detailed) label(ctx, entity.type === 'portal' ? entity.name : entity.id, x, y + 13, '#fff0ce', 9);
     }
     const [px, py] = point(this.player.x, this.player.y);
     ellipse(ctx, px, py, 7, 7, '#f5eee0'); ellipse(ctx, px, py, 4, 4, '#608675');
@@ -938,11 +1200,5 @@ export class World {
     this.mapTransform = { scale, ox, oy, width, height };
   }
 
-  moveToMap(x, y) {
-    if (!this.mapTransform) return;
-    const { scale, ox, oy } = this.mapTransform;
-    const point = { x: (x - ox) / scale, y: (y - oy) / scale };
-    if (this.scene === 'nest') this.path = this.graph.route(this.player, point);
-    else { const resource = this.outsideEntities.filter(e => e.available !== false).sort((a, b) => distance(a, point) - distance(b, point))[0]; this.guide = { id: resource.id, target: resource, otherScene: false }; }
-  }
+  moveToMap() { return false; }
 }

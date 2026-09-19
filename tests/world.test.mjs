@@ -30,14 +30,19 @@ test('every room is reachable; route samples stay inside open rooms and corridor
   }
 });
 
-test('digging opens a genuinely shorter connected route', () => {
+test('excavation moves the work face and only the final player dig opens the room', () => {
   const world = new World(fakeCanvas());
+  world.setState({ rank: 3, campaign: { 개통: false } });
   const fungus = NEST_ROOMS.find(room => room.id === 'fungus'), market = NEST_ROOMS.find(room => room.id === 'market');
   const before = pathLength(fungus, world.graph.route(fungus, market));
-  for (let i = 0; i < 4; i++) world.dig();
+  const initial = { ...world.nestEntities.find(entity => entity.id === 'dig') };
+  for (let i = 0; i < 7; i++) { Object.assign(world.player, world.nestEntities.find(entity => entity.id === 'dig')); world.dig(); }
   assert.equal(world.graph.open, false);
+  assert.ok(distance(initial, world.nestEntities.find(entity => entity.id === 'dig')) > 250);
+  Object.assign(world.player, world.nestEntities.find(entity => entity.id === 'dig'));
   assert.equal(world.dig().opened, true);
   assert.equal(world.graph.open, true);
+  assert.equal(world.state.campaign.개통, true);
   const after = pathLength(fungus, world.graph.route(fungus, market));
   assert.ok(after < before * .8, `${after} < ${before * .8}`);
 });
@@ -45,7 +50,7 @@ test('digging opens a genuinely shorter connected route', () => {
 test('snapshot restores position, construction and followers without duplication', () => {
   const world = new World(fakeCanvas());
   world.setState({ rank: 3 }); world.setMode('outside'); world.recruit(3);
-  world.player.x = 510; world.player.y = 730; world.setDug(7);
+  world.player.x = 510; world.player.y = 730; world.setDug(8);
   const snapshot = world.getSnapshot();
   world.applySnapshot(snapshot); world.applySnapshot(snapshot);
   assert.deepEqual(world.getSnapshot(), snapshot);
@@ -65,29 +70,28 @@ test('resources cannot be harvested twice and return after cooldown', () => {
   assert.equal(item.available, true);
 });
 
-test('guiding to another scene targets the door; direct NPC and station targets are reachable', () => {
+test('screen taps, map taps and legacy guide calls never move the player', () => {
   const world = new World(fakeCanvas(), { npcs: [{ id: '봄이', name: '봄이', room: 'entrance', role: '길잡이' }] });
   assert.equal(world.nearest().id, '봄이');
-  assert.equal(world.guideTo('seed'), true);
-  assert.equal(world.guide.target.id, 'exit');
-  assert.ok(world.path.length);
+  const start = { x: world.player.x, y: world.player.y };
+  assert.equal(world.guideTo('seed'), false);
   world.guideTo('nursery');
-  assert.equal(world.guide.target.id, 'nursery');
-  const destination = world.path.at(-1);
-  assert.ok(distance(destination, world.nestEntities.find(entity => entity.id === 'nursery')) < 1);
-  world.setMode('outside'); world.guideTo('봄이');
-  assert.equal(world.guide.target.id, 'entrance');
+  world.moveToScreen(500, 500); world.moveToMap(500, 500);
+  for (let i = 0; i < 20; i++) world.update(.08);
+  assert.equal(world.path.length, 0); assert.equal(world.guide, null);
+  assert.deepEqual({ x: world.player.x, y: world.player.y }, start);
 });
 
-test('moving follows a tunnel route until arriving without overshoot', () => {
+test('direct movement crosses room boundaries without snapping to a tunnel center or a remote room', () => {
   const world = new World(fakeCanvas());
-  world.guideTo('royal');
-  for (let i = 0; i < 1000 && world.path.length; i++) {
+  world.setInput(-.6, .8);
+  for (let i = 0; i < 1000; i++) {
+    const previous = { ...world.player };
     world.update(.08);
     assert.ok(inTunnel(world.player, world.graph));
+    assert.ok(distance(previous, world.player) < 18, 'no teleporting on collision');
   }
   assert.equal(world.path.length, 0);
-  assert.equal(world.nearest().id, 'royal');
 });
 
 test('outdoor movement is normalized and remains inside the garden', () => {
@@ -100,12 +104,10 @@ test('outdoor movement is normalized and remains inside the garden', () => {
 
 test('outdoor observation quest points to an outdoor station and stays interactable', () => {
   const world = new World(fakeCanvas());
-  world.guideTo('scout');
-  assert.equal(world.guide.target.id, 'exit');
-  world.setMode('outside'); world.guideTo('scout');
-  assert.equal(world.guide.target.id, 'scout');
-  assert.equal(world.guide.target.scene, 'outside');
-  Object.assign(world.player, { x: world.guide.target.x, y: world.guide.target.y });
+  world.setMode('outside');
+  const scout = world.getEntities().find(entity => entity.id === 'scout');
+  assert.equal(scout.scene, 'outside');
+  Object.assign(world.player, { x: scout.x, y: scout.y });
   assert.equal(world.nearest().id, 'scout');
 });
 
@@ -139,12 +141,10 @@ test('predator is an approachable fixed outdoor interaction and disappears when 
   world.setEvent({ id: '방문자', type: 'defend', count: 6, progress: 1 });
   assert.deepEqual({ x: world.predator.x, y: world.predator.y }, original);
   assert.ok(world.predatorRecoil > 0);
-  world.guideTo('guard');
-  assert.equal(world.guide.target.id, 'predator');
+  assert.ok(world.guardAnts.length >= 3);
   Object.assign(world.player, original);
   assert.equal(world.nearest().id, 'predator');
-  world.setMode('nest'); world.guideTo('predator');
-  assert.equal(world.guide.target.id, 'exit');
+  world.setMode('nest');
   world.setEvent(null);
   assert.equal(world.predator, null);
   assert.ok(!world.getEntities().some(entity => entity.id === 'predator'));

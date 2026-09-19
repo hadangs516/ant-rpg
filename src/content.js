@@ -47,7 +47,7 @@ export const NPCS = [
     '오늘 나른 흙이 내일 모두의 지름길이 되지. 발자국이 늘어날수록 기분이 좋아져.',
     '폐하, 새 방의 용도를 정했어요. 이름하여... 아무것도 안 하는 방! 필요하면 언제든 더 파 드리죠.' ] },
   { id: '책갈피', name: '책갈피', role: '군락 기록관', room: 'library', color: '#987b5c', personality: '꽃가루로 메모하며 소소한 발견도 소중히 적는다.', dialogue: [
-    '모르는 길을 발견하면 기록장에 남겨 둬. 아주 작은 씨앗도 처음 만난 날이 있잖아. 지도와 길 안내를 함께 쓰면 편해.',
+    '모르는 길을 발견하면 기록장에 남겨 둬. 아주 작은 씨앗도 처음 만난 날이 있잖아. 지도에서 방 이름을 확인하고 직접 걸어 봐.',
     '오늘 기록은 “모두 함께 큰 먹이를 들다”. 숫자만 적기엔 꽤 멋진 순간이었어.',
     '즉위식 기록 마지막 줄에는 이렇게 썼어요. “여왕은 왕관보다 동료들의 이름을 먼저 챙겼다.”' ] },
   { id: '은빛', name: '은빛', role: '군락의 여왕', room: 'royal', color: '#c5a165', personality: '오래된 여왕. 명령보다 듣는 일을 중요하게 여긴다.', dialogue: [
@@ -60,7 +60,7 @@ export const NPCS = [
     '호위 준비 끝! 목적지는... 휴게실인가요? 아주 전략적인 선택입니다. 저도 간식이 필요했어요.' ] },
   { id: '바람', name: '바람', role: '방향치 정찰병', room: 'scout', color: '#b39370', personality: '새 장소를 잘 찾지만 돌아올 때 지도를 거꾸로 든다.', dialogue: [
     '정찰 비결? 일단 나가 보는 거야! 돌아오는 비결은... 지도야. 바깥 관찰 지점에 도착하면 주변을 살펴봐.',
-    '오늘은 집을 바로 찾았어. 네 페로몬 길을 따라왔거든. 길 안내를 켜면 목적지 방향이 보여.',
+    '오늘은 집을 바로 찾았어. 네 페로몬 길을 따라왔거든. 정원에서 집 버튼을 누르면 땅 위에 집으로 이어지는 냄새가 보여.',
     '폐하와 떠나는 목적지 없는 산책! 길을 잃은 게 아니라 아직 목적지를 정하지 않은 거예요.' ] },
   { id: '몽글', name: '몽글', role: '버섯 정원사', room: 'fungus', color: '#ad9279', personality: '버섯과 대화하며 촉촉한 흙 냄새를 좋아한다.', dialogue: [
     '버섯들은 천천히 대답해. 그래서 기다리면서 차를 마시지. 이슬이 있으면 정원이 더 싱그러워질 거야.',
@@ -81,7 +81,7 @@ export const NPCS = [
 ];
 
 export const QUESTS = [
-  { id: '처음만난봄이', title: '처음 만난 선배', description: '입구의 봄이에게 다가가 말을 걸어 보세요. 굴 안에서는 가고 싶은 곳을 눌러 이동해요.', npc: '봄이', type: 'talk', target: '봄이', count: 1, xp: 20, rank: 0 },
+  { id: '처음만난봄이', title: '처음 만난 선배', description: '입구의 봄이에게 다가가 말을 걸어 보세요. 굴 안팎 모두 조이스틱 또는 방향키로 직접 이동해요.', npc: '봄이', type: 'talk', target: '봄이', count: 1, xp: 20, rank: 0 },
   { id: '작은식구돌보기', title: '작은 식구의 이불', description: '알방에서 돌보기를 세 번 해 주세요. 알방 보육사 도담이 기다리고 있어요.', npc: '도담', type: 'care', target: 'nursery', count: 3, xp: 35, rank: 0 },
   { id: '첫씨앗채집', title: '첫 번째 바깥나들이', description: '입구 문에서 상호작용해 초원으로 나가세요. 가까운 씨앗 다섯 개를 모아 봐요.', npc: '봄이', type: 'gather', target: 'seed', count: 5, xp: 45, rank: 0 },
   { id: '창고에첫선물', title: '창고에 놓는 첫 선물', description: '모은 씨앗 다섯 개를 창고지기 꾸벅에게 전달해 주세요. 지도는 집의 위치를 알려 줘요.', npc: '꾸벅', type: 'deliver', target: 'seed', count: 5, xp: 45, rank: 0 },
@@ -89,7 +89,7 @@ export const QUESTS = [
   { id: '첫배지수여', title: '작은 일개미의 배지', description: '첫 임무들을 마쳤어요. 봄이에게 돌아가 견습 일개미 배지를 받으세요.', npc: '봄이', type: 'talk', target: '봄이', count: 1, xp: 60, rank: 0 },
   { id: '아침이슬모으기', title: '물방울 속의 하늘', description: '초원의 푸른 이슬 다섯 방울을 모아 주세요. 잎사귀 주변을 살피면 찾을 수 있어요.', npc: '몽글', type: 'gather', target: 'dew', count: 5, xp: 60, rank: 1 },
   { id: '버섯정원의차', title: '버섯 정원의 작은 찻잔', description: '몽글에게 이슬 다섯 방울을 전달하세요. 버섯 정원에 촉촉한 아침을 선물해요.', npc: '몽글', type: 'deliver', target: 'dew', count: 5, xp: 60, rank: 1 },
-  { id: '지도를읽는법', title: '길을 기억하는 방법', description: '기록관 책갈피에게 말을 걸어 발견 기록과 길 안내에 관한 이야기를 들어 보세요.', npc: '책갈피', type: 'talk', target: '책갈피', count: 1, xp: 45, rank: 1 },
+  { id: '지도를읽는법', title: '길을 기억하는 방법', description: '기록관 책갈피에게 말을 걸어 지도와 이름이 지워진 기록에 관한 이야기를 들어 보세요.', npc: '책갈피', type: 'talk', target: '책갈피', count: 1, xp: 45, rank: 1 },
   { id: '잎사귀지붕재료', title: '바람에 날린 초록 조각', description: '초원에서 잎 조각 여섯 개를 모으세요. 뚝딱이 새 창고 지붕을 만들려고 해요.', npc: '뚝딱', type: 'gather', target: 'leaf', count: 6, xp: 70, rank: 1 },
   { id: '창고지붕올리기', title: '비가 와도 보송하게', description: '잎 조각 여섯 개를 공방의 뚝딱에게 전달하세요. 씨앗들이 비를 피할 수 있게 돼요.', npc: '뚝딱', type: 'deliver', target: 'leaf', count: 6, xp: 65, rank: 1 },
   { id: '정원까지지름길', title: '돌아가지 않아도 되는 길', description: '공사 구역에서 열 번 더 땅을 파세요. 길이 넓어지면 운반조도 더 편하게 다닐 수 있어요.', npc: '파삭', type: 'dig', target: 'dig', count: 10, xp: 90, rank: 1 },
@@ -109,8 +109,8 @@ export const QUESTS = [
   { id: '모두의축제준비', title: '굴마다 초록 리본', description: '뚝딱에게 잎 조각 여덟 개를 전달하세요. 우리가 함께 살아가는 굴 전체가 축제 장소예요.', npc: '뚝딱', type: 'deliver', target: 'leaf', count: 8, xp: 130, rank: 4 },
   { id: '마지막안전점검', title: '모든 식구가 안심하도록', description: '경비소에서 열 번 방어 연습을 하세요. 즉위식 날도 동료들과 힘을 모아 굴을 지킬 준비를 해요.', npc: '단단', type: 'defend', target: 'guard', count: 10, xp: 160, rank: 4 },
   { id: '첫약속기억하기', title: '가장 작은 식구와의 약속', description: '알방에서 여덟 번 돌보기를 해 주세요. 처음 맡았던 일을 기억하는 여왕이 되어 봐요.', npc: '도담', type: 'care', target: 'nursery', count: 8, xp: 140, rank: 4 },
-  { id: '은빛의부탁', title: '왕관은 함께 드는 것', description: '왕실의 은빛 여왕에게 말을 걸어 마지막 이야기를 들어 보세요. 친구들이 당신의 즉위를 기다려요.', npc: '은빛', type: 'talk', target: '은빛', count: 1, xp: 150, rank: 4 },
-  { id: '우리의여왕', title: '우리의 여왕', description: '왕좌에서 즉위식을 시작하세요. 클리어 후에도 끝나지 않는, 편안한 군락 생활이 이어져요.', npc: '은빛', type: 'royal', target: 'royal', count: 1, xp: 300, rank: 4 },
+  { id: '은빛의부탁', title: '왕관은 함께 드는 것', description: '왕실의 은빛 여왕에게 말을 걸어 마지막 제안을 들으세요. 닫힌 문 너머로 경비들의 발소리가 들려요.', npc: '은빛', type: 'talk', target: '은빛', count: 1, xp: 150, rank: 4 },
+  { id: '우리의여왕', title: '우리의 여왕', description: '왕좌에서 여왕의 제안에 대답하세요. 진정한 왕관을 얻기 위한 이야기는 아직 끝나지 않았어요.', npc: '은빛', type: 'royal', target: 'royal', count: 1, xp: 300, rank: 4 },
 ];
 
 export const EVENTS = [
@@ -122,8 +122,8 @@ export const EVENTS = [
   { id: '알방의재채기', name: '알방의 작은 소동', description: '꽃가루가 날아와 알방이 간질간질해요. 네 번 돌보기로 이불을 털어 주세요.', type: 'care', duration: 80, target: 'nursery', count: 4, reward: 50, minRank: 0 },
   { id: '흙벽의보물', name: '흙벽 속 반짝임', description: '굴착조가 예쁜 돌을 발견했어요. 여섯 번 땅을 파서 함께 꺼내 봐요.', type: 'dig', duration: 85, target: 'dig', count: 6, reward: 60, minRank: 0 },
   { id: '진딧물비가림', name: '풀숲 이웃의 작은 지붕', description: '진딧물 친구에게 그늘이 필요해요. 잎 조각 네 개를 모아 초록을 도와주세요.', type: 'gather', duration: 90, target: 'leaf', count: 4, reward: 60, minRank: 1 },
-  { id: '과자소풍', name: '오늘은 군락 소풍', description: '동료들과 과자 부스러기 세 개를 모아요. 크게 한입씩 나누면 더 맛있을 거예요.', type: 'gather', duration: 100, target: 'crumb', count: 3, reward: 75, minRank: 2 },
-  { id: '산딸기축제', name: '산딸기가 익는 날', description: '달콤한 열매 냄새가 퍼져요. 운반조와 산딸기 세 개를 모아 작은 잔치를 열어요.', type: 'gather', duration: 100, target: 'berry', count: 3, reward: 80, minRank: 3 },
+  { id: '과자소풍', name: '오늘은 군락 소풍', description: '동료들과 과자 부스러기 세 개를 모아요. 크게 한입씩 나누면 더 맛있을 거예요.', type: 'gather', duration: 180, target: 'crumb', count: 3, reward: 75, minRank: 2 },
+  { id: '산딸기축제', name: '산딸기가 익는 날', description: '달콤한 열매 냄새가 퍼져요. 운반조와 산딸기 세 개를 모아 작은 잔치를 열어요.', type: 'gather', duration: 180, target: 'berry', count: 3, reward: 80, minRank: 3 },
   { id: '여왕의정원산책', name: '여왕님의 느긋한 산책', description: '오늘은 바깥 관찰 지점에서 바람을 느껴 봐요. 호위 개미들도 오랜만에 소풍 기분이에요.', type: 'scout', duration: 100, target: 'scout', count: 1, reward: 40, minRank: 5, queenOnly: true },
 ];
 
